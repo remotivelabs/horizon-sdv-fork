@@ -208,7 +208,14 @@ function cuttlefish_wait_for_device_booted() {
     local -r timeout="${SECONDS}"+"${CUTTLEFISH_MAX_BOOT_TIME}"
     echo -e "${GREEN}Wait for boot: ${CUTTLEFISH_MAX_BOOT_TIME} seconds${NC}"
     while (( "${SECONDS}" < "${timeout}" )); do
+        # Newer cvd versions no longer print VIRTUAL_DEVICE_BOOT_COMPLETED to
+        # stdout (only to the instance launcher.log); they print
+        # "Virtual device booted successfully" instead. Accept either marker.
         BOOTED_INSTANCES=$(grep -c VIRTUAL_DEVICE_BOOT_COMPLETED "${logfile}")
+        BOOTED_SUCCESS_MSGS=$(grep -c "Virtual device booted successfully" "${logfile}")
+        if (( BOOTED_SUCCESS_MSGS > BOOTED_INSTANCES )); then
+            BOOTED_INSTANCES="${BOOTED_SUCCESS_MSGS}"
+        fi
         if (( BOOTED_INSTANCES == NUM_INSTANCES )); then
             echo -e "${GREEN}Boot completed.${NC}"
             break
