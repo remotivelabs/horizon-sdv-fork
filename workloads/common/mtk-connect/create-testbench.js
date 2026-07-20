@@ -50,7 +50,7 @@ const _ = require("lodash");
  * Sets up the Axios configuration with a base URL and authentication
  * credentials from environment variables.
  */
-const { MTK_CONNECT_DOMAIN, MTK_CONNECT_USERNAME, MTK_CONNECT_PASSWORD, MTK_CONNECT_REGISTRATION, MTK_CONNECT_TESTBENCH, MTK_CONNECT_TESTBENCH_USER, MTK_CONNECT_DEVICES, MTK_CONNECT_HOST_LIST, MTK_CONNECT_LAUNCH_APPLICATION_NAME, MTK_CONNECT_HOST_ONLY, MTK_CONNECT_DEVICE_PREFIX, MTK_CONNECT_HOST_PORT_LIST} = process.env;
+const { MTK_CONNECT_DOMAIN, MTK_CONNECT_USERNAME, MTK_CONNECT_PASSWORD, MTK_CONNECT_REGISTRATION, MTK_CONNECT_TESTBENCH, MTK_CONNECT_TESTBENCH_USER, MTK_CONNECT_DEVICES, MTK_CONNECT_HOST_LIST, MTK_CONNECT_LAUNCH_APPLICATION_NAME, MTK_CONNECT_HOST_ONLY, MTK_CONNECT_DEVICE_PREFIX, MTK_CONNECT_HOST_PORT_LIST, MTK_CONNECT_TERMINAL_USER} = process.env;
 const registration = MTK_CONNECT_REGISTRATION || fs.readFileSync('/usr/src/config/registration.name', 'utf-8');
 
 /** Tunnel caller port (ADB); env MTK_CONNECT_TUNNEL_PORT from Jenkins/shell, default 8555 */
@@ -224,6 +224,13 @@ async function configureDevice(i) {
     }
     await axios.patch(`/api/v1/agents/${agent.id}/devices/${index}`, data);
   } else {
+    // Terminal login user: MTK_CONNECT_TERMINAL_USER when set (host images whose
+    // interactive account is neither builder nor jenkins), else the historical
+    // builder -> jenkins fallback chain.
+    const terminalArgs = MTK_CONNECT_TERMINAL_USER
+      ? ['-c', `cd /home/${MTK_CONNECT_TERMINAL_USER}; su ${MTK_CONNECT_TERMINAL_USER}; bash --login`, '']
+      : ['-c', '[ -d /home/builder ] && { cd /home/builder; su builder; bash --login; } || { cd /home/jenkins; su jenkins; bash --login; }', ''];
+
     const data = {
       interface: {
         'fs': {
@@ -241,7 +248,7 @@ async function configureDevice(i) {
               'name': 'HOST',
               'driver': 'spawn',
               'command': 'bash',
-              'args': ['-c', '[ -d /home/builder ] && { cd /home/builder; su builder; bash --login; } || { cd /home/jenkins; su jenkins; bash --login; }', '']
+              'args': terminalArgs
             }
           ]
         }
