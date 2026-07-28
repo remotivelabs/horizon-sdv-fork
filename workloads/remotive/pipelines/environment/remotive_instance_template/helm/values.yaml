@@ -1,0 +1,121 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Default values for remotive_instance_template Argo charts.
+# GitOps: remotive-topology Application (gitops/modules/remotive-topology) adds this path as a Helm source.
+namespacePrefix: ""
+namespace: ""
+# Set by GitOps (userpass | app | none). Remote git uses prepare-pipeline-git-creds before clone.
+git:
+  authMethod: ""
+scm:
+  authMethod: ""
+# When set, the run step reads CLOUD_PROJECT / CLOUD_REGION / CLOUD_ZONE from this ConfigMap via container env.
+cloudEnvConfigMapName: "horizon-workflow-cloud-env"
+workflowTemplateName: remotive-instance-template
+# Cluster mutex name — at most one remotive-instance-template Workflow runs at a time. "" disables.
+instanceTemplateConcurrencyMutexName: remotive-instance-template
+podGcStrategy: OnWorkflowCompletion
+workflowTtlSecondsAfterCompletion:
+
+# Webhook / workflow-dispatch body fields mapped to WorkflowTemplate parameters (Sensors).
+# Sensors target parameters by name (GJSON #(name=="…")), not array index — safe to reorder.
+webhookWorkflowParameters:
+  - name: horizonSubmittedFrom
+    bodyKey: horizonSubmittedFrom
+  - name: instanceName
+    bodyKey: instanceName
+  - name: machineType
+    bodyKey: machineType
+  - name: osProject
+    bodyKey: osProject
+  - name: osFamily
+    bodyKey: osFamily
+  - name: bootDiskSize
+    bodyKey: bootDiskSize
+  - name: bootDiskType
+    bodyKey: bootDiskType
+  - name: maxRunDuration
+    bodyKey: maxRunDuration
+  - name: enableNestedVirtualization
+    bodyKey: enableNestedVirtualization
+  - name: delete
+    bodyKey: delete
+
+# KCC prerequisites for publishing ComputeInstanceTemplate CRs.
+kcc:
+  instanceTemplates:
+    # Renders the remotive CNRM PreDelete hook (removes remotive-it-* CRs on module uninstall).
+    enabled: true
+    # ConfigConnectorContext is a NAMESPACE SINGLETON (fixed name in the workflows
+    # namespace). The workloads-android module (cf_instance_template chart) also manages
+    # it. Enable here ONLY when workloads-android is not installed on the cluster —
+    # two Argo CD Applications must never both own the same context resource.
+    # NOTE: disabling whichever module owns the context removes it and breaks KCC
+    # publishing for the other module.
+    manageConfigConnectorContext: false
+    # Namespaced-mode Config Connector GSA; default gke-config-connector-sa@<project>.iam.gserviceaccount.com
+    configConnectorGoogleServiceAccount: ""
+
+spec:
+  cloudProject: ""
+  cloudRegion: ""
+  cloudZone: ""
+  # remotive builder container image (from this module's docker_image_template chart).
+  dockerArtifactPathName: horizon-sdv/remotive-builder
+  builderImageTag: argowf-latest
+  # KCC PreDelete hook Job only (kubectl + gcloud); not used by workflow DAG.
+  cnrmPresDeleteImage: "gcr.io/google.com/cloudsdktool/cloud-sdk:461.0.0"
+  pipelineRepoUrl: ""
+  pipelineRepoRevision: ""
+  pipelineRepoSecret: workflow-pipeline-git-creds
+  serviceAccountName: workflow-executor
+  # Packer + gcloud compute require Compute API permissions; the elevated KSA maps to
+  # gke-argo-workflows-elevated-sa.
+  useElevatedWorkflowIam: true
+  # GCE placement for the Packer builder and published template.
+  network: sdv-network
+  subnetwork: sdv-subnet
+  # Linux account baked into the golden image (docker group; OS Login/IAP access, no baked keys).
+  defaultUser: horizon
+  # Packer googlecompute IAP + SSH waits.
+  packerUseIap: true
+  packerSshTimeout: "15m"
+  packerIapTunnelLaunchWait: 300
+  # Max lifetime of the Packer BUILDER VM only (baked template VMs use maxRunDuration param).
+  packerBuildMaxRunDuration: "4h"
+  # Optional node placement.
+  nodeSelector: {}
+  tolerations: []
+  # run-remotive-template pod resources (packer + kubectl only; the heavy work happens on the builder VM).
+  runPodResources:
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+    limits:
+      cpu: "4000m"
+      memory: "8Gi"
+
+# WorkflowTemplate parameter defaults (Portal-facing).
+defaults:
+  instanceName: remotive-vm
+  machineType: e2-standard-4
+  osProject: ubuntu-os-cloud
+  osFamily: ubuntu-2404-lts-amd64
+  bootDiskSize: "100GB"
+  bootDiskType: pd-balanced
+  # Max lifetime of topology VMs created FROM the template (0 = uncapped).
+  maxRunDuration: "12h"
+  # "true" bakes a Cuttlefish-capable template (nested virtualization).
+  enableNestedVirtualization: "false"

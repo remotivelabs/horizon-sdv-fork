@@ -1,0 +1,59 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Description:
+# Default values for the remotive-topology builder image workflow Helm chart.
+# Namespace: if `namespace` is non-empty, use it; else `namespacePrefix` + "workflows".
+namespacePrefix: ""
+namespace: ""
+# Set by GitOps (userpass | app | none). Remote: ClusterWorkflowTemplate prepare-pipeline-git-creds runs before git fetch.
+git:
+  authMethod: ""
+workflowTemplateName: remotive-builder-image
+# Synchronization mutex name for Argo Workflows; "" disables concurrency blocking.
+builderImageConcurrencyMutexName: remotive-builder-image
+# Name of the shared ClusterWorkflowTemplate (from workloads/common/common_docker_image, module workloads-common).
+clusterWorkflowTemplateName: common-docker-image-build
+podGcStrategy: OnWorkflowCompletion
+workflowTtlSecondsAfterCompletion:
+# When set, cloud parameters resolve from this ConfigMap (keys CLOUD_PROJECT, CLOUD_REGION,
+# CLOUD_ZONE); "" for local clusters (falls back to spec.cloud*).
+cloudEnvConfigMapName: "horizon-workflow-cloud-env"
+
+spec:
+  # Target project/region/zone. Chart defaults for local helm; GitOps remotive-topology
+  # module overrides from config.projectID, .region, .zone.
+  cloudProject: sdva-2108202401
+  cloudRegion: europe-west1
+  cloudZone: europe-west1-d
+  # Docker image path under the artifact registry.
+  dockerArtifactPathName: horizon-sdv/remotive-builder
+  # When true, do not push built images.
+  dryRun: "false"
+  # Image tag to build/push.
+  imageTag: "argowf-latest"
+  dockerfileDir: workloads/remotive/pipelines/environment/docker_image_template
+  # Base image used in the Dockerfile build.
+  linuxDistribution: ubuntu:24.04
+  gcloudCliVersion: "latest"
+  kubectlVersion: "latest"
+  packerVersion: "1.15.0"
+  # Non-local: align with gitops config.workloads.android.url / .branch (same monorepo).
+  pipelineRepoUrl: ""
+  pipelineRepoRevision: ""
+  # Optional Secret for private HTTPS when scm.authMethod is pat. app uses per-run {{workflow.uid}}-pipeline-git-creds.
+  pipelineRepoSecret: ""
+  # When true, pods use workflow-executor-elevated; otherwise serviceAccountName below.
+  useElevatedWorkflowIam: true
+  serviceAccountName: workflow-executor

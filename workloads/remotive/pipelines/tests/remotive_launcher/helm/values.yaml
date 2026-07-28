@@ -1,0 +1,109 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Default values for the remotive-launcher Argo chart.
+# GitOps: remotive-topology Application (gitops/modules/remotive-topology) adds this path as a Helm source.
+namespacePrefix: ""
+namespace: ""
+git:
+  authMethod: ""
+scm:
+  authMethod: ""
+cloudEnvConfigMapName: "horizon-workflow-cloud-env"
+workflowTemplateName: remotive-launcher
+podGcStrategy: OnWorkflowCompletion
+workflowTtlSecondsAfterCompletion:
+
+# Webhook / workflow-dispatch body fields mapped to WorkflowTemplate parameters (Sensors).
+# Sensors target parameters by name (GJSON #(name=="…")), not array index — safe to reorder.
+webhookWorkflowParameters:
+  - name: horizonSubmittedFrom
+    bodyKey: horizonSubmittedFrom
+  - name: topologyName
+    bodyKey: topologyName
+  - name: topologyDownloadUrl
+    bodyKey: topologyDownloadUrl
+  - name: launcherFile
+    bodyKey: launcherFile
+  - name: instanceTemplateName
+    bodyKey: instanceTemplateName
+  - name: runTopologyTests
+    bodyKey: runTopologyTests
+  - name: keepAliveTime
+    bodyKey: keepAliveTime
+  - name: mtkConnectPublic
+    bodyKey: mtkConnectPublic
+  - name: mtkConnectTunnelPort
+    bodyKey: mtkConnectTunnelPort
+  - name: storageBucketDestination
+    bodyKey: storageBucketDestination
+  - name: storageLabels
+    bodyKey: storageLabels
+  - name: submittedBy
+    bodyKey: horizonSubmittedBy
+
+spec:
+  cloudProject: ""
+  cloudRegion: ""
+  cloudZone: ""
+  horizonDomain: ""
+  # remotive builder container image (from this module's docker_image_template chart).
+  dockerArtifactPathName: horizon-sdv/remotive-builder
+  builderImageTag: argowf-latest
+  pipelineRepoUrl: ""
+  pipelineRepoRevision: ""
+  pipelineRepoSecret: workflow-pipeline-git-creds
+  serviceAccountName: workflow-executor
+  # KCC ComputeInstance apply + Compute REST need elevated workflow IAM.
+  useElevatedWorkflowIam: true
+  # Default GCE instance template (published by remotive-instance-template as
+  # instance-template-<instanceName>).
+  instanceTemplateName: instance-template-remotive-vm
+  # RemotiveCloud auth Secret in the workflows namespace: keys `token` (service-account
+  # token; revocable, least-privilege) and `organization`. Created out-of-band — see the
+  # module README. Optional at the K8s level so pods start without it, but topology
+  # build fails fast when the values are missing.
+  remotiveCloudSecretName: workflow-remotive-cloud-auth
+  remotiveCloudTokenKey: token
+  remotiveCloudOrganizationKey: organization
+  # MTK Connect API key Secret (same pattern as cvd_launcher).
+  mtkConnectSecretName: workflow-mtk-connect-apikey
+  mtkConnectUsernameKey: username
+  mtkConnectPasswordKey: password
+  # GCS parent prefix for run artifacts; workflow appends /<YYYY-MM-DD-HHMMSS>_<workflow.name>/.
+  androidTestsWorkflowArtifactFolder: Remotive_Launcher_Workflows
+  # Guest status polling / timeouts.
+  guestPollSeconds: 30
+  guestPollFirstSeconds: 30
+  kccInstanceWaitTimeout: "20m"
+  gcpInstanceWaitTimeout: "15m"
+  # Optional node placement.
+  nodeSelector: {}
+  tolerations: []
+  runPodResources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+
+# WorkflowTemplate parameter defaults (Portal-facing).
+defaults:
+  topologyName: getting_started
+  runTopologyTests: "true"
+  # Idle keep-alive minutes after topology-up (and tests) before teardown; 0 = immediate.
+  keepAliveTime: "15"
+  mtkConnectPublic: "true"
+  mtkConnectTunnelPort: "8555"

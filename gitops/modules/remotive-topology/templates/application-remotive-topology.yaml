@@ -1,0 +1,114 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Child Application: multi-source remotive-topology (remotive-builder-image,
+# remotive-instance-template, remotive-launcher). Deployed only via Module Manager enable
+# (mod-remotive-topology → this Application).
+{{- if and .Values.repo.url .Values.repo.revision }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .Values.config.namespacePrefix }}remotive-topology
+  namespace: {{ .Values.config.namespacePrefix }}argocd
+  labels:
+    app.kubernetes.io/name: remotive-topology
+    horizon-sdv.io/module: {{ .Values.moduleName }}
+    horizon-sdv.io/app-role: child
+    horizon-sdv.io/module-manager-managed: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: {{ .Values.config.namespacePrefix }}horizon-sdv
+  sources:
+    - repoURL: {{ .Values.repo.url | quote }}
+      targetRevision: {{ .Values.repo.revision | quote }}
+      path: workloads/remotive/pipelines/environment/docker_image_template/helm
+      helm:
+        releaseName: remotive-topology-builder-image
+        values: |
+          namespacePrefix: {{ .Values.config.namespacePrefix | quote }}
+          git:
+            authMethod: {{ .Values.config.scm.authMethod | quote }}
+          scm:
+            authMethod: {{ .Values.config.scm.authMethod | quote }}
+          cloudEnvConfigMapName: "horizon-workflow-cloud-env"
+          spec:
+            cloudProject: {{ .Values.config.projectID | quote }}
+            cloudRegion: {{ .Values.config.region | quote }}
+            cloudZone: {{ .Values.config.zone | quote }}
+            pipelineRepoUrl: {{ .Values.config.workloads.android.url | quote }}
+            pipelineRepoRevision: {{ .Values.config.workloads.android.branch | quote }}
+            pipelineRepoSecret: {{ if or (eq .Values.config.scm.authMethod "userpass") (eq .Values.config.scm.authMethod "app") }}{{ "workflow-pipeline-git-creds" | quote }}{{ else }}{{ "" | quote }}{{ end }}
+    - repoURL: {{ .Values.repo.url | quote }}
+      targetRevision: {{ .Values.repo.revision | quote }}
+      path: workloads/remotive/pipelines/environment/remotive_instance_template/helm
+      helm:
+        releaseName: remotive-topology-instance-template
+        values: |
+          namespacePrefix: {{ .Values.config.namespacePrefix | quote }}
+          git:
+            authMethod: {{ .Values.config.scm.authMethod | quote }}
+          scm:
+            authMethod: {{ .Values.config.scm.authMethod | quote }}
+          cloudEnvConfigMapName: "horizon-workflow-cloud-env"
+          kcc:
+            instanceTemplates:
+              enabled: true
+              # Namespace singleton owned by workloads-android's cf_instance_template
+              # chart when that module is installed — see this chart's values.yaml.
+              manageConfigConnectorContext: {{ .Values.config.manageConfigConnectorContext | default false }}
+          spec:
+            cloudProject: {{ .Values.config.projectID | quote }}
+            cloudRegion: {{ .Values.config.region | quote }}
+            cloudZone: {{ .Values.config.zone | quote }}
+            pipelineRepoUrl: {{ .Values.config.workloads.android.url | quote }}
+            pipelineRepoRevision: {{ .Values.config.workloads.android.branch | quote }}
+            pipelineRepoSecret: {{ if or (eq .Values.config.scm.authMethod "userpass") (eq .Values.config.scm.authMethod "app") }}{{ "workflow-pipeline-git-creds" | quote }}{{ else }}{{ "" | quote }}{{ end }}
+    - repoURL: {{ .Values.repo.url | quote }}
+      targetRevision: {{ .Values.repo.revision | quote }}
+      path: workloads/remotive/pipelines/tests/remotive_launcher/helm
+      helm:
+        releaseName: remotive-topology-launcher
+        values: |
+          namespacePrefix: {{ .Values.config.namespacePrefix | quote }}
+          git:
+            authMethod: {{ .Values.config.scm.authMethod | quote }}
+          scm:
+            authMethod: {{ .Values.config.scm.authMethod | quote }}
+          cloudEnvConfigMapName: "horizon-workflow-cloud-env"
+          spec:
+            cloudProject: {{ .Values.config.projectID | quote }}
+            cloudRegion: {{ .Values.config.region | quote }}
+            cloudZone: {{ .Values.config.zone | quote }}
+            horizonDomain: {{ .Values.config.domain | quote }}
+            pipelineRepoUrl: {{ .Values.config.workloads.android.url | quote }}
+            pipelineRepoRevision: {{ .Values.config.workloads.android.branch | quote }}
+            pipelineRepoSecret: {{ if or (eq .Values.config.scm.authMethod "userpass") (eq .Values.config.scm.authMethod "app") }}{{ "workflow-pipeline-git-creds" | quote }}{{ else }}{{ "" | quote }}{{ end }}
+            remotiveCloudSecretName: {{ .Values.config.remotiveCloudSecretName | default "workflow-remotive-cloud-auth" | quote }}
+            mtkConnectSecretName: {{ .Values.config.mtkConnectSecretName | default "workflow-mtk-connect-apikey" | quote }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ .Values.config.namespacePrefix }}workflows
+  syncPolicy:
+    # automated.prune only: self-heal defaults to false and must not be set explicitly — Argo CD does not
+    # reliably persist selfHeal:false (omitempty); the field drifts absent vs desired and the parent mod-*
+    # Application stays OutOfSync (portal UPDATE IN PROGRESS) with self-heal off. Self-heal during
+    # resources-finalizer delete can re-queue sync while the Application is still deleting (Deleting→Sync wedge).
+    syncOptions:
+      - CreateNamespace=true
+    automated:
+      prune: true
+{{- end }}

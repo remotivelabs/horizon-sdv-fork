@@ -1,0 +1,79 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Description:
+# Argo WorkflowTemplate for building the remotive-topology (RemotiveTopology) builder
+# image used by remotive-instance-template and remotive-launcher workflow pods. Exposed in the
+# Horizon Developer Portal under module remotive-topology (horizon-sdv.io/expose=true).
+# Argo Events: Sensor webhook-remotive-builder-image (workflow/sensors.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: {{ .Values.workflowTemplateName | quote }}
+  namespace: {{ include "remotive-builder-image.workflowNamespace" . | quote }}
+  labels:
+    app.kubernetes.io/name: remotive-builder-image
+    horizon-sdv.io/expose: "true"
+    horizon-sdv.io/module: remotive-topology
+  annotations:
+    argocd.argoproj.io/sync-wave: "8"
+spec:
+  entrypoint: build
+  archiveLogs: true
+{{- if .Values.builderImageConcurrencyMutexName }}
+  synchronization:
+    mutex:
+      name: {{ .Values.builderImageConcurrencyMutexName | quote }}
+{{- end }}
+  serviceAccountName: {{ include "remotive-builder-image.workflowServiceAccountName" . | quote }}
+{{- if .Values.workflowTtlSecondsAfterCompletion }}
+  ttlStrategy:
+    secondsAfterCompletion: {{ .Values.workflowTtlSecondsAfterCompletion }}
+{{- end }}
+{{- if .Values.podGcStrategy }}
+  podGC:
+    strategy: {{ .Values.podGcStrategy | quote }}
+{{- end }}
+  workflowMetadata:
+    annotations:
+      workflows.argoproj.io/title: "Remotive Builder Image"
+      workflows.argoproj.io/description: "Build the container image used by remotive-topology workflow pods (packer, gcloud, kubectl)."
+  arguments:
+    parameters:
+      - name: horizonSubmittedFrom
+        value: ""
+        description: "Where the submit call originated (Horizon); mirrored on workflow label horizon-sdv.io/submitted-from."
+      - name: dockerArtifactPathName
+        value: {{ .Values.spec.dockerArtifactPathName | quote }}
+        description: "Artifact registry image path (repo/name)."
+      - name: dryRun
+        value: {{ .Values.spec.dryRun | quote }}
+        description: "When true, do not push built images."
+      - name: imageTag
+        value: {{ .Values.spec.imageTag | quote }}
+        description: "Image tag to build/push."
+      - name: linuxDistribution
+        value: {{ .Values.spec.linuxDistribution | quote }}
+        description: "Base distro for the Dockerfile build."
+      - name: gcloudCliVersion
+        value: {{ .Values.spec.gcloudCliVersion | quote }}
+        description: "gcloud CLI version to install."
+      - name: kubectlVersion
+        value: {{ .Values.spec.kubectlVersion | quote }}
+        description: "kubectl version to install."
+      - name: packerVersion
+        value: {{ .Values.spec.packerVersion | quote }}
+        description: "Packer version to install."
+  templates:
+{{ include "remotive-builder-image.template.build" . | nindent 4 }}

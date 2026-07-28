@@ -17,7 +17,7 @@ package controller
 import "testing"
 
 func TestModuleUsesPrefixedChildApplication(t *testing.T) {
-	for _, name := range []string{"workloads-android", "workloads-common"} {
+	for _, name := range []string{"workloads-android", "workloads-common", "remotive-topology"} {
 		if !ModuleUsesPrefixedChildApplication(name) {
 			t.Fatalf("%q: expected true", name)
 		}

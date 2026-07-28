@@ -1,0 +1,104 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Argo Events Sensor for this chart's WorkflowTemplate (same EventSource `webhook` / `workflow-dispatch`).
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: webhook-remotive-builder-image
+  namespace: {{ .Values.namespacePrefix }}argo-events
+  annotations:
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  eventBusName: default
+  template:
+    serviceAccountName: sensor-submit-workflow
+  dependencies:
+    - name: webhook-dep
+      eventSourceName: webhook
+      eventName: workflow-dispatch
+      filters:
+        data:
+          - path: body.workflowTemplateName
+            type: string
+            value:
+              - {{ .Values.workflowTemplateName | quote }}
+  triggers:
+    - template:
+        name: submit-remotive-builder-image
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: webhook-remotive-builder-image-
+                namespace: {{ include "remotive-builder-image.workflowNamespace" . | quote }}
+              spec:
+                workflowTemplateRef:
+                  name: {{ .Values.workflowTemplateName | quote }}
+                arguments:
+                  parameters:
+                    - name: horizonSubmittedFrom
+                    - name: dockerArtifactPathName
+                    - name: dryRun
+                    - name: imageTag
+                    - name: linuxDistribution
+                    - name: gcloudCliVersion
+                    - name: kubectlVersion
+                    - name: packerVersion
+          # Positional mapping: dest indexes MUST match the parameter order in the
+          # skeleton above (0 = horizonSubmittedFrom ... 7 = packerVersion).
+          parameters:
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.horizonSubmittedBy
+              dest: metadata.annotations.horizon-sdv\.io/submitted-by
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.horizonSubmittedFrom
+              dest: metadata.labels.horizon-sdv\.io/submitted-from
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.horizonSubmittedFrom
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.dockerArtifactPathName
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.dryRun
+              dest: spec.arguments.parameters.2.value
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.imageTag
+              dest: spec.arguments.parameters.3.value
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.linuxDistribution
+              dest: spec.arguments.parameters.4.value
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.gcloudCliVersion
+              dest: spec.arguments.parameters.5.value
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.kubectlVersion
+              dest: spec.arguments.parameters.6.value
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.packerVersion
+              dest: spec.arguments.parameters.7.value

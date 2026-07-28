@@ -18,11 +18,13 @@ package controller
 const PrefixedModuleExpectedManagedApplicationCount = 2
 
 // ModuleUsesPrefixedChildApplication reports modules that use a mod-* parent and a prefixed child Argo CD Application.
-// workloads-common shares the same teardown shape as workloads-android for the child Application only;
-// Cuttlefish KCC ComputeInstanceTemplate cleanup runs only for workloads-android (that chart owns cf-it-* CRs).
+// workloads-common and remotive-topology share the same teardown shape as workloads-android for the child
+// Application only; Cuttlefish KCC ComputeInstanceTemplate + ConfigConnectorContext cleanup runs only for
+// workloads-android (that chart owns cf-it-* CRs). remotive-topology removes its remotive-it-* CRs via the
+// chart's own CNRM PreDelete hook during child Application prune.
 func ModuleUsesPrefixedChildApplication(moduleName string) bool {
 	switch moduleName {
-	case "workloads-android", "workloads-common":
+	case "workloads-android", "workloads-common", "remotive-topology":
 		return true
 	default:
 		return false
