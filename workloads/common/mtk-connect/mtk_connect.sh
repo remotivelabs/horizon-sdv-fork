@@ -34,6 +34,9 @@
 #  - MTK_CONNECT_TUNNEL_PORT: ADB tunnel caller port in create-testbench (default 8555).
 #  - MTK_CONNECT_TERMINAL_USER: login user for the HOST terminal (host-only
 #    devices); defaults to the builder/jenkins fallback chain.
+#  - MTK_CONNECT_TUNNEL_LIST: comma-separated name:port entries (host-only
+#    devices); each becomes a raw TCP tunnel to the device host for the
+#    MTK Connect Tunnel client.
 #
 # Example Usage:
 # sudo \
@@ -61,6 +64,7 @@ MTK_CONNECT_HOST_ONLY=${MTK_CONNECT_HOST_ONLY:-false}
 MTK_CONNECT_DEVICE_PREFIX=${MTK_CONNECT_DEVICE_PREFIX:-AAOS}
 MTK_CONNECT_TUNNEL_PORT=${MTK_CONNECT_TUNNEL_PORT:-8555}
 MTK_CONNECT_TERMINAL_USER=${MTK_CONNECT_TERMINAL_USER:-}
+MTK_CONNECT_TUNNEL_LIST=${MTK_CONNECT_TUNNEL_LIST:-}
 NODEJS_VERSION=${NODEJS_VERSION-20.9.0}
 
 declare -r scripts_path="/usr/src/scripts"
@@ -108,6 +112,7 @@ function mtkc_start() {
         echo "MTK_CONNECT_DEVICE_PREFIX=${MTK_CONNECT_DEVICE_PREFIX}"
         echo "MTK_CONNECT_TUNNEL_PORT=${MTK_CONNECT_TUNNEL_PORT}"
         echo "MTK_CONNECT_TERMINAL_USER=${MTK_CONNECT_TERMINAL_USER}"
+        echo "MTK_CONNECT_TUNNEL_LIST=${MTK_CONNECT_TUNNEL_LIST}"
     } >> "${scripts_path}"/.env
 
     {
@@ -240,6 +245,7 @@ Environment:
     MTK_CONNECT_DEVICE_PREFIX=${MTK_CONNECT_DEVICE_PREFIX}
     MTK_CONNECT_TUNNEL_PORT=${MTK_CONNECT_TUNNEL_PORT}
     MTK_CONNECT_TERMINAL_USER=${MTK_CONNECT_TERMINAL_USER}
+    MTK_CONNECT_TUNNEL_LIST=${MTK_CONNECT_TUNNEL_LIST}
    "
 echo "${VARIABLES}"
 
