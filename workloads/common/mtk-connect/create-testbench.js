@@ -50,7 +50,7 @@ const _ = require("lodash");
  * Sets up the Axios configuration with a base URL and authentication
  * credentials from environment variables.
  */
-const { MTK_CONNECT_DOMAIN, MTK_CONNECT_USERNAME, MTK_CONNECT_PASSWORD, MTK_CONNECT_REGISTRATION, MTK_CONNECT_TESTBENCH, MTK_CONNECT_TESTBENCH_USER, MTK_CONNECT_DEVICES, MTK_CONNECT_HOST_LIST, MTK_CONNECT_LAUNCH_APPLICATION_NAME, MTK_CONNECT_HOST_ONLY, MTK_CONNECT_DEVICE_PREFIX, MTK_CONNECT_HOST_PORT_LIST, MTK_CONNECT_TERMINAL_USER} = process.env;
+const { MTK_CONNECT_DOMAIN, MTK_CONNECT_USERNAME, MTK_CONNECT_PASSWORD, MTK_CONNECT_REGISTRATION, MTK_CONNECT_TESTBENCH, MTK_CONNECT_TESTBENCH_USER, MTK_CONNECT_DEVICES, MTK_CONNECT_HOST_LIST, MTK_CONNECT_LAUNCH_APPLICATION_NAME, MTK_CONNECT_HOST_ONLY, MTK_CONNECT_DEVICE_PREFIX, MTK_CONNECT_HOST_PORT_LIST, MTK_CONNECT_TERMINAL_USER, MTK_CONNECT_TUNNEL_LIST} = process.env;
 const registration = MTK_CONNECT_REGISTRATION || fs.readFileSync('/usr/src/config/registration.name', 'utf-8');
 
 /** Tunnel caller port (ADB); env MTK_CONNECT_TUNNEL_PORT from Jenkins/shell, default 8555 */
@@ -253,6 +253,26 @@ async function configureDevice(i) {
           ]
         }
       }
+    }
+
+    // MTK_CONNECT_TUNNEL_LIST: comma-separated name:port entries, each exposed
+    // as a raw TCP tunnel to the device host (MTK_CONNECT_HOST_LIST) for the
+    // MTK Connect Tunnel client; caller.port = port gives one-click tunnels on
+    // the same local port.
+    if (MTK_CONNECT_TUNNEL_LIST) {
+      const tunnelHost = adbHosts[index - 1];
+      data.interface.tunnel = {
+        'types': MTK_CONNECT_TUNNEL_LIST.split(',').map((entry) => {
+          const [name, port] = entry.split(':');
+          return {
+            'name': name,
+            'driver': 'tcp',
+            'host': tunnelHost,
+            'port': +port,
+            'caller': { 'port': +port }
+          };
+        })
+      };
     }
 
     if (MTK_CONNECT_LAUNCH_APPLICATION_NAME) {
