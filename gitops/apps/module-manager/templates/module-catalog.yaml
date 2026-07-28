@@ -77,3 +77,10 @@ spec:
       overviewServiceNamespace: {{ .Values.namespace | quote }}
       hardDependencies:
         - workloads-common
+    - name: remotive-topology
+      path: gitops/modules/remotive-topology
+      overviewPath: portal/overview.html
+      overviewService: mod-remotive-topology-overview
+      overviewServiceNamespace: {{ .Values.namespace | quote }}
+      hardDependencies:
+        - workloads-common

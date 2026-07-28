@@ -1,0 +1,186 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# remotive-topology instance template: Packer bake (Docker, remotivebus, remotive CLI)
+# + KCC ComputeInstanceTemplate publish. Run remotive-builder-image first so the builder
+# container image exists in Artifact Registry.
+# spec.onExit runs orphan-packer-disk-cleanup in a separate pod so unattached packer-*
+# boot disks are removed even when the main pod fails or is killed.
+{{- $root := . }}
+{{- $auth := include "remotive-instance-template.scmAuthMethod" $root | trim }}
+{{- $umbrellaCreds := or (eq $auth "app") (eq $auth "userpass") }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: {{ $root.Values.workflowTemplateName | quote }}
+  namespace: {{ include "remotive-instance-template.workflowNamespace" $root | quote }}
+  labels:
+    app.kubernetes.io/name: remotive-instance-template
+    horizon-sdv.io/expose: "true"
+    horizon-sdv.io/module: remotive-topology
+  annotations:
+    argocd.argoproj.io/sync-wave: "8"
+spec:
+  entrypoint: main
+  onExit: orphan-packer-disk-cleanup
+  archiveLogs: true
+{{- if $root.Values.instanceTemplateConcurrencyMutexName }}
+  synchronization:
+    mutex:
+      name: {{ $root.Values.instanceTemplateConcurrencyMutexName | quote }}
+{{- end }}
+  serviceAccountName: {{ include "remotive-instance-template.workflowServiceAccountName" $root | quote }}
+{{- if $root.Values.workflowTtlSecondsAfterCompletion }}
+  ttlStrategy:
+    secondsAfterCompletion: {{ $root.Values.workflowTtlSecondsAfterCompletion }}
+{{- end }}
+{{- if $root.Values.podGcStrategy }}
+  podGC:
+    strategy: {{ $root.Values.podGcStrategy | quote }}
+{{- end }}
+  workflowMetadata:
+    annotations:
+      workflows.argoproj.io/title: "Remotive Instance Template"
+      workflows.argoproj.io/description: "Bake the RemotiveTopology golden image with Packer and publish a GCE instance template (KCC). Run remotive-builder-image first."
+  arguments:
+    parameters:
+      - name: horizonSubmittedFrom
+        value: ""
+        description: "Opaque provenance label (e.g. portal id); stored on workflow labels."
+      - name: instanceName
+        value: {{ $root.Values.defaults.instanceName | quote }}
+        description: "Naming stem: publishes image-<name> and instance-template-<name>."
+      - name: machineType
+        value: {{ $root.Values.defaults.machineType | quote }}
+        description: "GCE machine type for the Packer builder and the published template."
+      - name: osProject
+        value: {{ $root.Values.defaults.osProject | quote }}
+        description: "GCE image project for osFamily (e.g. ubuntu-os-cloud)."
+      - name: osFamily
+        value: {{ $root.Values.defaults.osFamily | quote }}
+        description: "Source image family (tracks latest image, e.g. ubuntu-2404-lts-amd64)."
+      - name: bootDiskSize
+        value: {{ $root.Values.defaults.bootDiskSize | quote }}
+        description: "Boot disk size for builder and template VMs (e.g. 100GB)."
+      - name: bootDiskType
+        value: {{ $root.Values.defaults.bootDiskType | quote }}
+        description: "Boot disk type (e.g. pd-balanced)."
+      - name: maxRunDuration
+        value: {{ $root.Values.defaults.maxRunDuration | quote }}
+        description: "Max lifetime of topology VMs created from the template (e.g. 12h; 0 = uncapped). Not the Packer builder."
+      - name: enableNestedVirtualization
+        value: {{ $root.Values.defaults.enableNestedVirtualization | quote }}
+        description: "When true, the published template enables nested virtualization (Cuttlefish-capable topologies)."
+      - name: delete
+        value: "false"
+        description: "When true, run delete stage only (remotive_create_instance_template.sh stage 3)."
+  templates:
+    - name: main
+      dag:
+        tasks:
+{{- if $umbrellaCreds }}
+          - name: prepare-pipeline-git-creds
+            templateRef:
+              name: prepare-pipeline-git-creds
+              template: prepare-pipeline-git-creds
+              clusterScope: true
+            arguments:
+              parameters:
+                - name: scmAuthMethod
+                  value: {{ include "remotive-instance-template.scmAuthMethod" $root | trim | quote }}
+                - name: pipelineStaticGitSecretName
+                  value: {{ $root.Values.spec.pipelineRepoSecret | default "workflow-pipeline-git-creds" | quote }}
+                - name: horizonSubmittedFrom
+                  value: '{{ "{{" }}workflow.parameters.horizonSubmittedFrom{{ "}}" }}'
+{{- end }}
+          - name: run-remotive-template
+            template: run-remotive-template
+{{- if $umbrellaCreds }}
+            depends: prepare-pipeline-git-creds.Succeeded
+{{- end }}
+    - name: run-remotive-template
+      inputs:
+        artifacts:
+{{ include "remotive-instance-template.pipelineRepoGitArtifact" $root | nindent 10 }}
+{{- if $root.Values.spec.nodeSelector }}
+      nodeSelector:
+{{- toYaml $root.Values.spec.nodeSelector | nindent 8 }}
+{{- end }}
+{{- if $root.Values.spec.tolerations }}
+      tolerations:
+{{- toYaml $root.Values.spec.tolerations | nindent 8 }}
+{{- end }}
+      container:
+        image: {{ include "remotive-instance-template.builderImage" $root | quote }}
+        imagePullPolicy: Always
+        workingDir: /workspace
+{{- include "remotive-instance-template.cloudEnvFrom" $root | nindent 8 }}
+        resources:
+{{- toYaml $root.Values.spec.runPodResources | nindent 10 }}
+        command: [bash, -euo, pipefail, -c]
+        args:
+          - |
+            export WORKSPACE=/workspace
+            export PROJECT="${CLOUD_PROJECT:-{{ $root.Values.spec.cloudProject }}}"
+            export REGION="${CLOUD_REGION:-{{ $root.Values.spec.cloudRegion }}}"
+            export ZONE="${CLOUD_ZONE:-{{ $root.Values.spec.cloudZone }}}"
+            export NETWORK={{ $root.Values.spec.network | quote }}
+            export SUBNET={{ $root.Values.spec.subnetwork | quote }}
+            export DEFAULT_USER={{ $root.Values.spec.defaultUser | quote }}
+            export WORKFLOWS_NAMESPACE={{ include "remotive-instance-template.workflowNamespace" $root | quote }}
+            export REMOTIVE_INSTANCE_NAME='{{ "{{" }}workflow.parameters.instanceName{{ "}}" }}'
+            export MACHINE_TYPE='{{ "{{" }}workflow.parameters.machineType{{ "}}" }}'
+            export OS_PROJECT='{{ "{{" }}workflow.parameters.osProject{{ "}}" }}'
+            export OS_FAMILY='{{ "{{" }}workflow.parameters.osFamily{{ "}}" }}'
+            export BOOT_DISK_SIZE='{{ "{{" }}workflow.parameters.bootDiskSize{{ "}}" }}'
+            export BOOT_DISK_TYPE='{{ "{{" }}workflow.parameters.bootDiskType{{ "}}" }}'
+            export MAX_RUN_DURATION='{{ "{{" }}workflow.parameters.maxRunDuration{{ "}}" }}'
+            export ENABLE_NESTED_VIRTUALIZATION='{{ "{{" }}workflow.parameters.enableNestedVirtualization{{ "}}" }}'
+            export PACKER_USE_IAP="{{ $root.Values.spec.packerUseIap | default true | toString | lower }}"
+            export PACKER_SSH_TIMEOUT={{ $root.Values.spec.packerSshTimeout | default "15m" | quote }}
+            export PACKER_IAP_TUNNEL_LAUNCH_WAIT="{{ $root.Values.spec.packerIapTunnelLaunchWait | default 300 }}"
+            export PACKER_BUILD_MAX_RUN_DURATION={{ $root.Values.spec.packerBuildMaxRunDuration | default "4h" | quote }}
+            ST="1"
+            if [[ '{{ "{{" }}workflow.parameters.delete{{ "}}" }}' == "true" ]]; then
+              ST="3"
+            fi
+            cd workloads/remotive/pipelines/environment/remotive_instance_template
+            # Git artifact mounts are often noexec — invoke with bash.
+            exec bash ./remotive_create_instance_template.sh "${ST}"
+    - name: orphan-packer-disk-cleanup
+      inputs:
+        artifacts:
+{{ include "remotive-instance-template.pipelineRepoGitArtifact" $root | nindent 10 }}
+      container:
+        # cloud-sdk only (gcloud + python3); do not require the remotive builder image on failed runs.
+        image: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+        imagePullPolicy: IfNotPresent
+        workingDir: /workspace
+{{- include "remotive-instance-template.cloudEnvFrom" $root | nindent 8 }}
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+        command: [bash, -euo, pipefail, -c]
+        args:
+          - |
+            export WORKSPACE=/workspace
+            export PROJECT="${CLOUD_PROJECT:-{{ $root.Values.spec.cloudProject }}}"
+            export ZONE="${CLOUD_ZONE:-{{ $root.Values.spec.cloudZone }}}"
+            cd workloads/remotive/pipelines/environment/remotive_instance_template
+            exec bash ./remotive_create_instance_template.sh orphan-disks

@@ -1,0 +1,117 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# PreDelete: remove remotive-owned ComputeInstanceTemplate CRs before the module uninstalls,
+# so a ConfigConnectorContext finalizer is never blocked by leftover remotive CRs.
+# Scope: label horizon-sdv.io/remotive-kcc-template=true, plus name prefix remotive-it-* fallback.
+# Deliberately NO delete-all safety net: the workflows namespace is shared with
+# workloads-android (cf-it-* CRs) — never delete other modules' templates.
+{{- if and .Values.kcc .Values.kcc.instanceTemplates .Values.kcc.instanceTemplates.enabled }}
+{{- $ns := include "remotive-instance-template.workflowNamespace" . }}
+{{- $img := .Values.spec.cnrmPresDeleteImage | default "gcr.io/google.com/cloudsdktool/cloud-sdk:461.0.0" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: remotive-instance-template-cnrm-presdelete
+  namespace: {{ $ns | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: remotive-instance-template-cnrm-presdelete
+  namespace: {{ $ns | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+rules:
+  - apiGroups: ["compute.cnrm.cloud.google.com"]
+    resources: ["computeinstancetemplates"]
+    verbs: ["get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: remotive-instance-template-cnrm-presdelete
+  namespace: {{ $ns | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: remotive-instance-template-cnrm-presdelete
+subjects:
+  - kind: ServiceAccount
+    name: remotive-instance-template-cnrm-presdelete
+    namespace: {{ $ns | quote }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: remotive-instance-template-cnrm-presdelete
+  namespace: {{ $ns | quote }}
+  annotations:
+    argocd.argoproj.io/hook: PreDelete
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    # KCC can take a long time to finalize GCP deletion.
+    argocd.argoproj.io/hook-timeout: "1200"
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: remotive-instance-template-cnrm-presdelete
+    spec:
+      serviceAccountName: remotive-instance-template-cnrm-presdelete
+      restartPolicy: Never
+      {{- if .Values.spec.nodeSelector }}
+      nodeSelector:
+{{- toYaml .Values.spec.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.spec.tolerations }}
+      tolerations:
+{{- toYaml .Values.spec.tolerations | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: kubectl
+          image: {{ $img | quote }}
+          imagePullPolicy: IfNotPresent
+          command: [bash, -euo, pipefail, -c]
+          args:
+            - |
+              set -euo pipefail
+              ns="{{ $ns }}"
+              echo "PreDelete: removing remotive ComputeInstanceTemplate CRs (labeled) in ${ns}"
+              kubectl delete computeinstancetemplates.compute.cnrm.cloud.google.com \
+                -n "${ns}" \
+                -l horizon-sdv.io/remotive-kcc-template=true \
+                --ignore-not-found=true \
+                --wait=true \
+                --timeout=900s
+              echo "PreDelete: fallback — any remaining remotive-it-* ComputeInstanceTemplate (missed label)"
+              while IFS= read -r res; do
+                [ -z "${res}" ] && continue
+                base="${res##*/}"
+                case "${base}" in remotive-it-*)
+                  kubectl delete "${res}" -n "${ns}" \
+                    --ignore-not-found=true \
+                    --wait=true \
+                    --timeout=900s
+                  ;;
+                esac
+              done < <(kubectl get computeinstancetemplates.compute.cnrm.cloud.google.com -n "${ns}" -o name 2>/dev/null || true)
+              echo "PreDelete: remotive CNRM templates cleared"
+{{- end }}

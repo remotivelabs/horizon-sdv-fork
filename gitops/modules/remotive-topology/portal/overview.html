@@ -1,0 +1,156 @@
+<!-- Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License. -->
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>remotive-topology module</title>
+    <style>
+      :root {
+        --bg: #f8f9fa;
+        --paper: #ffffff;
+        --text: #202124;
+        --muted: #5f6368;
+        --primary: #1a73e8;
+        --border: #e8eaed;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #202124;
+          --paper: #292a2d;
+          --text: #e8eaed;
+          --muted: #9aa0a6;
+          --primary: #8ab4f8;
+          --border: #3c4043;
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Google Sans", Roboto, Arial, sans-serif;
+        line-height: 1.55;
+      }
+      main {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+      }
+      h1 {
+        font-size: 1.6rem;
+        margin-bottom: 0.2em;
+      }
+      h2 {
+        font-size: 1.15rem;
+        margin-top: 1.6em;
+      }
+      p,
+      li {
+        color: var(--muted);
+      }
+      code {
+        background: var(--paper);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0 4px;
+        color: var(--text);
+      }
+      pre {
+        background: var(--paper);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px;
+        overflow-x: auto;
+        color: var(--text);
+      }
+      .card {
+        background: var(--paper);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px 20px;
+        margin-top: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>RemotiveTopology</h1>
+      <p>
+        Run <strong>RemotiveTopology</strong> vehicle-system simulations
+        ("system of systems") on ephemeral GCE VMs. A topology instantiates a
+        platform of ECUs, CAN buses, and recorded or simulated traffic via
+        RemotiveBroker — from a single restbus to a full virtual car with a
+        Cuttlefish IHU.
+      </p>
+
+      <div class="card">
+        <h2>Workflows</h2>
+        <ul>
+          <li>
+            <code>remotive-builder-image</code> — build the container image used by
+            the other workflows (packer, gcloud, kubectl). Run once first.
+          </li>
+          <li>
+            <code>remotive-instance-template</code> — bake the golden VM image
+            (Docker, remotivebus, remotive CLI) with Packer and publish the GCE
+            instance template. Run before the first launch and after dependency
+            updates.
+          </li>
+          <li>
+            <code>remotive-launcher</code> — boot an ephemeral VM from the template,
+            build and start a topology (default: the vendored
+            <code>getting_started</code> project, or any project via
+            <code>topologyDownloadUrl</code>), optionally run its tests, keep it
+            alive for interactive access, then tear down. Logs and results land
+            in GCS.
+          </li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>One-time setup: RemotiveCloud credentials</h2>
+        <p>
+          Topology builds authenticate against RemotiveCloud. Create a Secret in
+          the workflows namespace with a
+          <em>revocable, least-privilege service-account token</em>
+          (never personal credentials):
+        </p>
+        <pre>
+kubectl -n &lt;prefix&gt;workflows create secret generic workflow-remotive-cloud-auth \
+  --from-literal=token=&lt;service-account-token&gt; \
+  --from-literal=organization=&lt;organization-id&gt;</pre
+        >
+      </div>
+
+      <div class="card">
+        <h2>Accessing a running topology</h2>
+        <p>
+          All interactive access goes through <strong>MTK Connect</strong>,
+          which requires the <code>workflow-mtk-connect-apikey</code> Secret in
+          the workflows namespace (created by the mtk-connect module). While a
+          launch is in its keep-alive window, the testbench
+          (<code>remotive-launcher-&lt;n&gt;</code>) exposes RemotiveStudio
+          (port <code>57123</code>) and the topology's
+          <code>forward_ports</code> as raw TCP tunnels, plus a
+          <code>HOST</code> terminal on the VM. Topologies that declare
+          <code>adb_devices</code> instead register one MTK Connect Android
+          device per entry, with live screen streaming, adb terminal, logcat
+          and touch input.
+        </p>
+      </div>
+    </main>
+  </body>
+</html>

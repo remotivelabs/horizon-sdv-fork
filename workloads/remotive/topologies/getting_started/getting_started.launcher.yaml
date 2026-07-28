@@ -1,0 +1,44 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# remotive-launcher descriptor for this topology (Horizon-specific; not part of the
+# upstream example). Read by remotive_argo_remote_entry.sh on the ephemeral VM.
+# Translation of the ansible/topologies/<name>.yaml axis from the upstream
+# remote-deployment example: which instance files build the topology, which
+# compose overlays/profiles run it, and which ports a user forwards to reach it.
+
+# Instance files passed to `remotive topology build` as -f flags, in order,
+# relative to the topology project root.
+topology_instances:
+  - instances/main.instance.yaml
+
+# Extra docker compose -f overlay files, relative to the project root (none here).
+compose_overlays: []
+
+# docker compose --profile values enabled for the long-running stack. The `tester`
+# profile is NOT listed: it is run separately (`docker compose run tester`) by the
+# launcher when runTopologyTests=true so its exit code gives pass/fail.
+compose_profiles: []
+
+# Compose service (profile `tester`) whose exit code is the test verdict.
+test_service: tester
+
+# Topology ports reachable during the keep-alive window: via IAP SSH port-forward
+# and as MTK Connect TCP tunnels, under the given name. Both name and port are
+# required. The web UI is RemotiveStudio, started by the launcher on 57123 and
+# exposed the same two ways — not listed here because it is launcher-managed,
+# not a topology port.
+forward_ports:
+  - name: RemotiveBroker
+    port: 50051

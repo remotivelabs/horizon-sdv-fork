@@ -1,0 +1,238 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Remotive Launcher: ephemeral GCE VM running a RemotiveTopology instance (Path B driver,
+# cvd-launcher parity). Run remotive-builder-image and remotive-instance-template first.
+# Guest artifacts land under <staging>/ephemeral-output/ in GCS and are also exposed
+# as an Argo output artifact — no separate staging sync stage.
+{{- $root := . }}
+{{- $auth := include "remotive-launcher.scmAuthMethod" $root | trim }}
+{{- $umbrellaCreds := or (eq $auth "app") (eq $auth "userpass") }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: {{ $root.Values.workflowTemplateName | quote }}
+  namespace: {{ include "remotive-launcher.workflowNamespace" $root | quote }}
+  labels:
+    app.kubernetes.io/name: remotive-launcher
+    horizon-sdv.io/expose: "true"
+    horizon-sdv.io/module: remotive-topology
+  annotations:
+    argocd.argoproj.io/sync-wave: "8"
+spec:
+  entrypoint: main
+  archiveLogs: true
+  serviceAccountName: {{ include "remotive-launcher.workflowServiceAccountName" $root | quote }}
+{{- if $root.Values.podGcStrategy }}
+  podGC:
+    strategy: {{ $root.Values.podGcStrategy | quote }}
+{{- end }}
+{{- if $root.Values.workflowTtlSecondsAfterCompletion }}
+  ttlStrategy:
+    secondsAfterCompletion: {{ $root.Values.workflowTtlSecondsAfterCompletion }}
+{{- end }}
+  workflowMetadata:
+    annotations:
+      workflows.argoproj.io/title: "Remotive Launcher (RemotiveTopology on ephemeral GCE)"
+      workflows.argoproj.io/description: "Boot an ephemeral GCE VM from the remotive instance template and run a RemotiveTopology instance. Run remotive-builder-image and remotive-instance-template first; create the workflow-remotive-cloud-auth Secret."
+  arguments:
+    parameters:
+      - name: horizonSubmittedFrom
+        value: ""
+        description: "Opaque provenance label (e.g. portal id); stored on workflow labels."
+      - name: topologyName
+        value: {{ $root.Values.defaults.topologyName | quote }}
+        description: "Topology to run: a vendored project under workloads/remotive/topologies/ (default getting_started), or the project name when topologyDownloadUrl is set."
+      - name: topologyDownloadUrl
+        value: ""
+        description: "Optional topology project source instead of the vendored copy: gs://bucket/dir or an https .tgz URL."
+      - name: launcherFile
+        value: ""
+        description: "Optional launcher descriptor path relative to the topology project root; empty means <topologyName>.launcher.yaml."
+      - name: instanceTemplateName
+        value: {{ $root.Values.spec.instanceTemplateName | quote }}
+        description: "GCE instance template published by remotive-instance-template (instance-template-<instanceName>)."
+      - name: runTopologyTests
+        value: {{ $root.Values.defaults.runTopologyTests | quote }}
+        description: "When true, run the topology's test compose service (descriptor test_service, default 'tester') after topology-up; failure fails the workflow."
+      - name: keepAliveTime
+        value: {{ $root.Values.defaults.keepAliveTime | quote }}
+        description: "Idle keep-alive minutes after topology-up (and tests) before teardown; 0 tears down immediately."
+      - name: mtkConnectPublic
+        value: {{ $root.Values.defaults.mtkConnectPublic | quote }}
+        description: "When true, MTK testbench user is everyone (public)."
+      - name: mtkConnectTunnelPort
+        value: {{ $root.Values.defaults.mtkConnectTunnelPort | quote }}
+        description: "Local tunnel port for MTK Connect."
+      - name: storageBucketDestination
+{{- if $root.Values.spec.cloudProject }}
+        value: 'gs://{{ $root.Values.spec.cloudProject }}-aaos/RemotiveTopology/{{ $root.Values.spec.androidTestsWorkflowArtifactFolder | default "Remotive_Launcher_Workflows" }}'
+        description: "GCS parent prefix for run artifacts; workflow appends /<YYYY-MM-DD-HHMMSS>_<workflow.name>/."
+{{- else }}
+        value: ""
+{{- end }}
+      - name: storageLabels
+        value: ""
+        description: "Optional label string for GCS uploads (see workloads/common/storage/storage.sh)."
+      - name: submittedBy
+        value: ""
+        description: "Submitting user for private MTK testbenches (Portal sets preferred_username)."
+  templates:
+    - name: main
+      dag:
+        tasks:
+{{- if $umbrellaCreds }}
+          - name: prepare-pipeline-git-creds
+            templateRef:
+              name: prepare-pipeline-git-creds
+              template: prepare-pipeline-git-creds
+              clusterScope: true
+            arguments:
+              parameters:
+                - name: scmAuthMethod
+                  value: {{ include "remotive-launcher.scmAuthMethod" $root | trim | quote }}
+                - name: pipelineStaticGitSecretName
+                  value: {{ $root.Values.spec.pipelineRepoSecret | default "workflow-pipeline-git-creds" | quote }}
+                - name: horizonSubmittedFrom
+                  value: '{{ "{{" }}workflow.parameters.horizonSubmittedFrom{{ "}}" }}'
+{{- end }}
+          - name: compute-staging-uri
+            template: compute-staging-uri
+            arguments:
+              parameters:
+                - name: storageBucketBase
+                  value: '{{ "{{" }}workflow.parameters.storageBucketDestination{{ "}}" }}'
+          - name: run-remotive-ephemeral-gce
+            template: run-remotive-ephemeral-gce
+            depends: >-
+{{- if $umbrellaCreds }}
+              prepare-pipeline-git-creds.Succeeded &&
+{{- end }}
+              compute-staging-uri.Succeeded
+            arguments:
+              parameters:
+                - name: stagingUri
+                  value: '{{ "{{" }}tasks.compute-staging-uri.outputs.parameters.resolvedStagingUri{{ "}}" }}'
+    - name: compute-staging-uri
+      inputs:
+        parameters:
+          - name: storageBucketBase
+      outputs:
+        parameters:
+          - name: resolvedStagingUri
+            valueFrom:
+              path: /tmp/resolved-staging-uri.txt
+      metadata:
+        annotations:
+          workflows.argoproj.io/description: "Compose gs://.../<YYYY-MM-DD-HHMMSS>_<workflow.name> once per workflow."
+      container:
+        image: {{ include "remotive-launcher.builderImage" $root | quote }}
+        imagePullPolicy: Always
+        command: [bash, -euo, pipefail, -c]
+        args:
+          - |
+            _base="{{ "{{" }}inputs.parameters.storageBucketBase{{ "}}" }}"
+            if [[ -z "${_base}" ]]; then
+              echo "storageBucketDestination is required (guest I/O goes through GCS)" >&2
+              exit 2
+            fi
+            _wf="{{ "{{" }}workflow.name{{ "}}" }}"
+            printf '%s' "${_base%/}/$(date +%Y-%m-%d-%H%M%S)_${_wf}" > /tmp/resolved-staging-uri.txt
+    - name: run-remotive-ephemeral-gce
+      inputs:
+        parameters:
+          - name: stagingUri
+        artifacts:
+{{ include "remotive-launcher.pipelineRepoGitArtifact" $root | nindent 10 }}
+{{- if $root.Values.spec.nodeSelector }}
+      nodeSelector:
+{{- toYaml $root.Values.spec.nodeSelector | nindent 8 }}
+{{- end }}
+{{- if $root.Values.spec.tolerations }}
+      tolerations:
+{{- toYaml $root.Values.spec.tolerations | nindent 8 }}
+{{- end }}
+      container:
+        image: {{ include "remotive-launcher.builderImage" $root | quote }}
+        imagePullPolicy: Always
+        workingDir: /workspace
+{{- include "remotive-launcher.cloudEnvFrom" $root | nindent 8 }}
+        env:
+          - name: JOB_NAME
+            value: '{{ "{{" }}workflow.name{{ "}}" }}'
+          - name: BUILD_NUMBER
+            value: '{{ "{{" }}workflow.uid{{ "}}" }}'
+          - name: WORKFLOW_UID
+            value: '{{ "{{" }}workflow.uid{{ "}}" }}'
+          - name: TOPOLOGY_NAME
+            value: '{{ "{{" }}workflow.parameters.topologyName{{ "}}" }}'
+          - name: TOPOLOGY_DOWNLOAD_URL
+            value: '{{ "{{" }}workflow.parameters.topologyDownloadUrl{{ "}}" }}'
+          - name: REMOTIVE_LAUNCHER_FILE
+            value: '{{ "{{" }}workflow.parameters.launcherFile{{ "}}" }}'
+          - name: RUN_TOPOLOGY_TESTS
+            value: '{{ "{{" }}workflow.parameters.runTopologyTests{{ "}}" }}'
+          - name: REMOTIVE_KEEP_ALIVE_TIME
+            value: '{{ "{{" }}workflow.parameters.keepAliveTime{{ "}}" }}'
+          - name: BUILD_USER_ID
+            value: '{{ "{{" }}workflow.parameters.submittedBy{{ "}}" }}'
+          - name: MTK_CONNECT_PUBLIC
+            value: '{{ "{{" }}workflow.parameters.mtkConnectPublic{{ "}}" }}'
+          - name: MTK_CONNECT_TUNNEL_PORT
+            value: '{{ "{{" }}workflow.parameters.mtkConnectTunnelPort{{ "}}" }}'
+          - name: STORAGE_LABELS
+            value: '{{ "{{" }}workflow.parameters.storageLabels{{ "}}" }}'
+          - name: REMOTIVE_TEST_RESULTS_STAGING_URI
+            value: '{{ "{{" }}inputs.parameters.stagingUri{{ "}}" }}'
+{{- if $root.Values.spec.horizonDomain }}
+          - name: HORIZON_DOMAIN
+            value: {{ $root.Values.spec.horizonDomain | quote }}
+{{- end }}
+{{- include "remotive-launcher.remotiveCloudEnv" $root | nindent 10 }}
+{{- include "remotive-launcher.mtkConnectEnv" $root | nindent 10 }}
+{{- if not $root.Values.cloudEnvConfigMapName }}
+          - name: CLOUD_PROJECT
+            value: {{ $root.Values.spec.cloudProject | quote }}
+          - name: CLOUD_REGION
+            value: {{ $root.Values.spec.cloudRegion | quote }}
+          - name: CLOUD_ZONE
+            value: {{ $root.Values.spec.cloudZone | quote }}
+{{- end }}
+        resources:
+{{- toYaml $root.Values.spec.runPodResources | nindent 10 }}
+        command: [bash, -euo, pipefail, -c]
+        args:
+          - |
+            export WORKSPACE=/workspace
+            export K8S_WORKFLOWS_NAMESPACE={{ include "remotive-launcher.workflowNamespace" $root | quote }}
+            export REMOTIVE_ARGO_GUEST_POLL_SEC={{ $root.Values.spec.guestPollSeconds | default 30 }}
+            export REMOTIVE_ARGO_GUEST_POLL_FIRST_SEC={{ $root.Values.spec.guestPollFirstSeconds | default 30 }}
+            export REMOTIVE_ARGO_KCC_WAIT_TIMEOUT={{ $root.Values.spec.kccInstanceWaitTimeout | default "20m" | quote }}
+            export REMOTIVE_ARGO_GCP_WAIT_TIMEOUT={{ $root.Values.spec.gcpInstanceWaitTimeout | default "15m" | quote }}
+            export REMOTIVE_ARGO_INSTANCE_TEMPLATE='{{ "{{" }}workflow.parameters.instanceTemplateName{{ "}}" }}'
+            export REMOTIVE_ARGO_VM_NAME="remotive-{{ "{{" }}workflow.uid{{ "}}" }}"
+            if [[ -z "${REMOTIVE_ARGO_INSTANCE_TEMPLATE}" ]]; then
+              echo "instanceTemplateName is required" >&2
+              exit 2
+            fi
+            export REMOTIVE_ARGO_LOCAL_ARTIFACT_ROOT=/tmp/remotive-argo-artifacts
+            mkdir -p "${REMOTIVE_ARGO_LOCAL_ARTIFACT_ROOT}"
+            # Git artifact mounts are often noexec — invoke with bash.
+            bash workloads/remotive/pipelines/tests/remotive_launcher/remotive_argo_gce/remotive_argo_gce_ephemeral.sh
+      outputs:
+        artifacts:
+          - name: remotive-argo-artifacts
+            path: /tmp/remotive-argo-artifacts
+            optional: true
