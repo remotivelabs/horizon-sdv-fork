@@ -35,6 +35,14 @@ resource "google_compute_router_nat" "vpc_nat" {
 
   source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
 
+  # Dynamic port allocation (requires endpoint-independent mapping disabled):
+  # VMs running many concurrent egress connections (e.g. parallel docker image
+  # builds fetching from PyPI) exhaust the static default of 64 ports per VM.
+  enable_dynamic_port_allocation      = true
+  enable_endpoint_independent_mapping = false
+  min_ports_per_vm                    = 64
+  max_ports_per_vm                    = 4096
+
   subnetwork {
     name                    = module.vpc.subnets["${var.region}/${var.subnetwork}"].self_link
     source_ip_ranges_to_nat = ["ALL_IP_RANGES"]
@@ -63,6 +71,12 @@ resource "google_compute_router_nat" "arm64_nat" {
 
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
+
+  # Dynamic port allocation, matching vpc_nat above.
+  enable_dynamic_port_allocation      = true
+  enable_endpoint_independent_mapping = false
+  min_ports_per_vm                    = 64
+  max_ports_per_vm                    = 4096
 
   subnetwork {
     name                    = module.vpc.subnets["${var.arm64_region}/${var.arm64_subnetwork}"].self_link
