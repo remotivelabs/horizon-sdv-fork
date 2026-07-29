@@ -50,7 +50,7 @@ const _ = require("lodash");
  * Sets up the Axios configuration with a base URL and authentication
  * credentials from environment variables.
  */
-const { MTK_CONNECT_DOMAIN, MTK_CONNECT_USERNAME, MTK_CONNECT_PASSWORD, MTK_CONNECT_REGISTRATION, MTK_CONNECT_TESTBENCH, MTK_CONNECT_TESTBENCH_USER, MTK_CONNECT_DEVICES, MTK_CONNECT_HOST_LIST, MTK_CONNECT_LAUNCH_APPLICATION_NAME, MTK_CONNECT_HOST_ONLY, MTK_CONNECT_DEVICE_PREFIX, MTK_CONNECT_HOST_PORT_LIST, MTK_CONNECT_TERMINAL_USER, MTK_CONNECT_TUNNEL_LIST} = process.env;
+const { MTK_CONNECT_DOMAIN, MTK_CONNECT_USERNAME, MTK_CONNECT_PASSWORD, MTK_CONNECT_REGISTRATION, MTK_CONNECT_TESTBENCH, MTK_CONNECT_TESTBENCH_USER, MTK_CONNECT_DEVICES, MTK_CONNECT_HOST_LIST, MTK_CONNECT_LAUNCH_APPLICATION_NAME, MTK_CONNECT_HOST_ONLY, MTK_CONNECT_DEVICE_PREFIX, MTK_CONNECT_DEVICE_NAME_LIST, MTK_CONNECT_HOST_PORT_LIST, MTK_CONNECT_TERMINAL_USER, MTK_CONNECT_TUNNEL_LIST} = process.env;
 const registration = MTK_CONNECT_REGISTRATION || fs.readFileSync('/usr/src/config/registration.name', 'utf-8');
 
 /** Tunnel caller port (ADB); env MTK_CONNECT_TUNNEL_PORT from Jenkins/shell, default 8555 */
@@ -130,13 +130,18 @@ async function configureDevice(i) {
 
   console.log(`device ${index} ... `);
 
+  // Device display name: per-index MTK_CONNECT_DEVICE_NAME_LIST entry when
+  // provided, else "<prefix> <index>".
+  const deviceNames = (MTK_CONNECT_DEVICE_NAME_LIST || '').split(',');
+  const deviceName = deviceNames[index - 1] || `${MTK_CONNECT_DEVICE_PREFIX} ${index}`;
+
   const rsp = await axios.get('/api/v1/devices', {params: {q: JSON.stringify(q)}})
   if (rsp.status === 200 && rsp.data.data.length === 1) {
     console.log(`device ${index} already exists`);
   } else {
     console.log(`creating device ${index}`);
     await axios.post(`/api/v1/agents/${agent.id}/devices`, {
-      name: `${MTK_CONNECT_DEVICE_PREFIX} ${index}`
+      name: deviceName
     });
   }
 
@@ -148,6 +153,33 @@ async function configureDevice(i) {
   console.log(+adbPorts[index - 1]);
   console.log(adbHosts[index - 1]);
   console.log(`tunnel caller.port=${mtkTunnelPort} (MTK_CONNECT_TUNNEL_PORT)`);
+
+  // HOST terminal login user: MTK_CONNECT_TERMINAL_USER when set (host images
+  // whose interactive account is neither builder nor jenkins), else the
+  // historical builder -> jenkins fallback chain.
+  const terminalArgs = MTK_CONNECT_TERMINAL_USER
+    ? ['-c', `cd /home/${MTK_CONNECT_TERMINAL_USER}; su ${MTK_CONNECT_TERMINAL_USER}; bash --login`, '']
+    : ['-c', '[ -d /home/builder ] && { cd /home/builder; su builder; bash --login; } || { cd /home/jenkins; su jenkins; bash --login; }', ''];
+
+  // adb-mode HOST terminal: keep the historical plain login shell unless a
+  // terminal user is explicitly requested.
+  const adbTerminalArgs = MTK_CONNECT_TERMINAL_USER ? terminalArgs : ['-c', 'cd ~/; bash --login', ''];
+
+  // MTK_CONNECT_TUNNEL_LIST: comma-separated name:port entries, each exposed
+  // as a raw TCP tunnel to the device host (MTK_CONNECT_HOST_LIST) for the
+  // MTK Connect Tunnel client; caller.port = port gives one-click tunnels on
+  // the same local port.
+  const tcpTunnelTypes = (tunnelHost) =>
+    MTK_CONNECT_TUNNEL_LIST.split(',').map((entry) => {
+      const [name, port] = entry.split(':');
+      return {
+        'name': name,
+        'driver': 'tcp',
+        'host': tunnelHost,
+        'port': +port,
+        'caller': { 'port': +port }
+      };
+    });
 
   if (MTK_CONNECT_HOST_ONLY == 'false') {
     const data = {
@@ -203,7 +235,7 @@ async function configureDevice(i) {
               'name': 'HOST',
               'driver': 'spawn',
               'command': 'bash',
-              'args': ['-c', 'cd ~/; bash --login', '']
+              'args': adbTerminalArgs
             }
           ]
         },
@@ -222,15 +254,13 @@ async function configureDevice(i) {
         }
       }
     }
+    // Raw TCP tunnels ride along on device 1 only: every device would otherwise
+    // register the same caller ports, and one tunnel set serves the testbench.
+    if (MTK_CONNECT_TUNNEL_LIST && index === 1) {
+      data.interface.tunnel.types.push(...tcpTunnelTypes(adbHosts[index - 1]));
+    }
     await axios.patch(`/api/v1/agents/${agent.id}/devices/${index}`, data);
   } else {
-    // Terminal login user: MTK_CONNECT_TERMINAL_USER when set (host images whose
-    // interactive account is neither builder nor jenkins), else the historical
-    // builder -> jenkins fallback chain.
-    const terminalArgs = MTK_CONNECT_TERMINAL_USER
-      ? ['-c', `cd /home/${MTK_CONNECT_TERMINAL_USER}; su ${MTK_CONNECT_TERMINAL_USER}; bash --login`, '']
-      : ['-c', '[ -d /home/builder ] && { cd /home/builder; su builder; bash --login; } || { cd /home/jenkins; su jenkins; bash --login; }', ''];
-
     const data = {
       interface: {
         'fs': {
@@ -255,23 +285,9 @@ async function configureDevice(i) {
       }
     }
 
-    // MTK_CONNECT_TUNNEL_LIST: comma-separated name:port entries, each exposed
-    // as a raw TCP tunnel to the device host (MTK_CONNECT_HOST_LIST) for the
-    // MTK Connect Tunnel client; caller.port = port gives one-click tunnels on
-    // the same local port.
     if (MTK_CONNECT_TUNNEL_LIST) {
-      const tunnelHost = adbHosts[index - 1];
       data.interface.tunnel = {
-        'types': MTK_CONNECT_TUNNEL_LIST.split(',').map((entry) => {
-          const [name, port] = entry.split(':');
-          return {
-            'name': name,
-            'driver': 'tcp',
-            'host': tunnelHost,
-            'port': +port,
-            'caller': { 'port': +port }
-          };
-        })
+        'types': tcpTunnelTypes(adbHosts[index - 1])
       };
     }
 
