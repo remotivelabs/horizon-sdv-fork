@@ -50,7 +50,7 @@ const _ = require("lodash");
  * Sets up the Axios configuration with a base URL and authentication
  * credentials from environment variables.
  */
-const { MTK_CONNECT_DOMAIN, MTK_CONNECT_USERNAME, MTK_CONNECT_PASSWORD, MTK_CONNECT_REGISTRATION, MTK_CONNECT_TESTBENCH, MTK_CONNECT_TESTBENCH_USER, MTK_CONNECT_DEVICES, MTK_CONNECT_HOST_LIST, MTK_CONNECT_LAUNCH_APPLICATION_NAME, MTK_CONNECT_HOST_ONLY, MTK_CONNECT_DEVICE_PREFIX, MTK_CONNECT_DEVICE_NAME_LIST, MTK_CONNECT_HOST_PORT_LIST, MTK_CONNECT_TERMINAL_USER, MTK_CONNECT_TUNNEL_LIST} = process.env;
+const { MTK_CONNECT_DOMAIN, MTK_CONNECT_USERNAME, MTK_CONNECT_PASSWORD, MTK_CONNECT_REGISTRATION, MTK_CONNECT_TESTBENCH, MTK_CONNECT_TESTBENCH_USER, MTK_CONNECT_DEVICES, MTK_CONNECT_HOST_LIST, MTK_CONNECT_LAUNCH_APPLICATION_NAME, MTK_CONNECT_HOST_ONLY, MTK_CONNECT_DEVICE_PREFIX, MTK_CONNECT_DEVICE_NAME_LIST, MTK_CONNECT_HOST_PORT_LIST, MTK_CONNECT_TERMINAL_USER, MTK_CONNECT_TUNNEL_LIST, MTK_CONNECT_TUNNEL_DEVICE_NAME} = process.env;
 const registration = MTK_CONNECT_REGISTRATION || fs.readFileSync('/usr/src/config/registration.name', 'utf-8');
 
 /** Tunnel caller port (ADB); env MTK_CONNECT_TUNNEL_PORT from Jenkins/shell, default 8555 */
@@ -59,6 +59,13 @@ const mtkTunnelPort = (() => {
   const n = parseInt(raw != null && raw !== '' ? raw : '8555', 10);
   return Number.isFinite(n) && n > 0 && n <= 65535 ? n : 8555;
 })();
+
+// MTK_CONNECT_TUNNEL_DEVICE_NAME: when adb devices are in play (HOST_ONLY
+// false) and there are raw TCP tunnels, carry the tunnels on a dedicated
+// host-only device with this name at index 1 instead of riding along on the
+// first adb device; the adb devices then occupy indexes 2..N+1.
+const tunnelDeviceName = (MTK_CONNECT_HOST_ONLY == 'false' && MTK_CONNECT_TUNNEL_LIST && MTK_CONNECT_TUNNEL_DEVICE_NAME) || '';
+const deviceCount = parseInt(MTK_CONNECT_DEVICES, 10) + (tunnelDeviceName ? 1 : 0);
 
 axios.defaults.baseURL = `https://${MTK_CONNECT_DOMAIN}/mtk-connect`;
 axios.defaults.auth = {
@@ -114,7 +121,7 @@ async function configureAgent() {
  * Configures the devices by creating them if they don't already exist.
  */
 async function configureDevices() {
-  await BPromise.mapSeries(_.times(MTK_CONNECT_DEVICES), configureDevice)
+  await BPromise.mapSeries(_.times(deviceCount), configureDevice)
 }
 
 /**
@@ -123,6 +130,10 @@ async function configureDevices() {
  */
 async function configureDevice(i) {
   const index = i + 1;
+  // With a dedicated tunnel device at index 1, the adb host/port/name lists
+  // are offset by one: adb device N lives at agent index N+1.
+  const isTunnelDevice = tunnelDeviceName && index === 1;
+  const adbIndex = tunnelDeviceName ? index - 1 : index;
   const q = {
     'agent.registration': registration,
     index: index
@@ -130,10 +141,13 @@ async function configureDevice(i) {
 
   console.log(`device ${index} ... `);
 
-  // Device display name: per-index MTK_CONNECT_DEVICE_NAME_LIST entry when
-  // provided, else "<prefix> <index>".
+  // Device display name: tunnel device name for the dedicated tunnel device,
+  // else per-index MTK_CONNECT_DEVICE_NAME_LIST entry when provided, else
+  // "<prefix> <index>".
   const deviceNames = (MTK_CONNECT_DEVICE_NAME_LIST || '').split(',');
-  const deviceName = deviceNames[index - 1] || `${MTK_CONNECT_DEVICE_PREFIX} ${index}`;
+  const deviceName = isTunnelDevice
+    ? tunnelDeviceName
+    : deviceNames[adbIndex - 1] || `${MTK_CONNECT_DEVICE_PREFIX} ${index}`;
 
   const rsp = await axios.get('/api/v1/devices', {params: {q: JSON.stringify(q)}})
   if (rsp.status === 200 && rsp.data.data.length === 1) {
@@ -150,8 +164,10 @@ async function configureDevice(i) {
 
   console.log(adbPorts);
   console.log(adbHosts);
-  console.log(+adbPorts[index - 1]);
-  console.log(adbHosts[index - 1]);
+  if (!isTunnelDevice) {
+    console.log(+adbPorts[adbIndex - 1]);
+    console.log(adbHosts[adbIndex - 1]);
+  }
   console.log(`tunnel caller.port=${mtkTunnelPort} (MTK_CONNECT_TUNNEL_PORT)`);
 
   // HOST terminal login user: MTK_CONNECT_TERMINAL_USER when set (host images
@@ -182,12 +198,44 @@ async function configureDevice(i) {
     });
 
   if (MTK_CONNECT_HOST_ONLY == 'false') {
+    if (isTunnelDevice) {
+      // Dedicated tunnel-carrier device: HOST fs/terminal plus all raw TCP
+      // tunnels; the adb devices at index 2..N+1 keep only their adb tunnel.
+      const data = {
+        interface: {
+          'fs': {
+            'types': [
+              {
+                'name': 'HOST',
+                'driver': 'native',
+                'root': '/root'
+              }
+            ]
+          },
+          'terminal': {
+            'types': [
+              {
+                'name': 'HOST',
+                'driver': 'spawn',
+                'command': 'bash',
+                'args': terminalArgs
+              }
+            ]
+          },
+          'tunnel': {
+            'types': tcpTunnelTypes(adbHosts[0])
+          }
+        }
+      }
+      await axios.patch(`/api/v1/agents/${agent.id}/devices/${index}`, data);
+      return;
+    }
     const data = {
       interface: {
         'adb': {
           'mode': 'tcp',
-          'port': +adbPorts[index - 1],
-          'host': adbHosts[index - 1]
+          'port': +adbPorts[adbIndex - 1],
+          'host': adbHosts[adbIndex - 1]
         },
         'button': {
           'driver': 'adb',
@@ -254,10 +302,11 @@ async function configureDevice(i) {
         }
       }
     }
-    // Raw TCP tunnels ride along on device 1 only: every device would otherwise
-    // register the same caller ports, and one tunnel set serves the testbench.
-    if (MTK_CONNECT_TUNNEL_LIST && index === 1) {
-      data.interface.tunnel.types.push(...tcpTunnelTypes(adbHosts[index - 1]));
+    // Legacy ride-along (no MTK_CONNECT_TUNNEL_DEVICE_NAME): raw TCP tunnels
+    // attach to adb device 1 only — every device would otherwise register the
+    // same caller ports, and one tunnel set serves the testbench.
+    if (MTK_CONNECT_TUNNEL_LIST && !tunnelDeviceName && index === 1) {
+      data.interface.tunnel.types.push(...tcpTunnelTypes(adbHosts[adbIndex - 1]));
     }
     await axios.patch(`/api/v1/agents/${agent.id}/devices/${index}`, data);
   } else {
@@ -287,7 +336,7 @@ async function configureDevice(i) {
 
     if (MTK_CONNECT_TUNNEL_LIST) {
       data.interface.tunnel = {
-        'types': tcpTunnelTypes(adbHosts[index - 1])
+        'types': tcpTunnelTypes(adbHosts[adbIndex - 1])
       };
     }
 

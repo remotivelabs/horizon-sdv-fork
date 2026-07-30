@@ -174,19 +174,26 @@ function run_mtk_start() {
   # path.
   local host_ip
   host_ip="$(hostname -I | sed 's/ .*//')"
-  local tunnel_list="studio:${STUDIO_PORT}" fwd entry
+  # All raw TCP tunnels (RemotiveStudio + forward_ports) live on a dedicated
+  # host-only MTK device with this hardcoded name.
+  local topology_device="RemotiveTopology"
+  local tunnel_list="RemotiveStudio:${STUDIO_PORT}" fwd entry
   fwd="$(_descriptor_named_ports forward_ports)" || { echo "[remotive-argo-remote] ERROR: invalid forward_ports in ${DESCRIPTOR}" >&2; return 1; }
   while IFS= read -r entry; do
     [[ -n "${entry}" && "${entry##*:}" != "${STUDIO_PORT}" ]] && tunnel_list+=",${entry}"
   done <<<"${fwd}"
   # Topology adb_devices (name:port entries) become full MTK Connect Android
-  # devices (screen, adb terminal, logcat, touch) instead of the single
-  # HOST-only device; the named TCP tunnels stay on device 1 either way.
+  # devices (screen, adb terminal, logcat, touch) alongside the host-only
+  # RemotiveTopology device that carries the named TCP tunnels
+  # (MTK_CONNECT_TUNNEL_DEVICE_NAME). Without adb_devices only the
+  # RemotiveTopology host device is created.
   local adb_devices
   adb_devices="$(_descriptor_named_ports adb_devices)" || { echo "[remotive-argo-remote] ERROR: invalid adb_devices in ${DESCRIPTOR}" >&2; return 1; }
-  local host_only=true devices=0 host_list="${host_ip}" port_list="${STUDIO_PORT}" name_list=""
+  local host_only=true devices=0 host_list="${host_ip}" port_list="${STUDIO_PORT}" name_list="${topology_device}"
   if [[ -n "${adb_devices}" ]]; then
-    host_only=false host_list="" port_list=""
+    # MTK_CONNECT_DEVICE_NAME_LIST carries adb names only; the topology device
+    # is named via MTK_CONNECT_TUNNEL_DEVICE_NAME.
+    host_only=false host_list="" port_list="" name_list=""
     while IFS= read -r entry; do
       [[ -n "${entry}" ]] || continue
       devices=$((devices + 1))
@@ -242,6 +249,7 @@ function run_mtk_start() {
     MTK_CONNECT_HOST_ONLY="${host_only}" \
     MTK_CONNECT_DEVICE_NAME_LIST="${name_list}" \
     MTK_CONNECT_TUNNEL_LIST="${tunnel_list}" \
+    MTK_CONNECT_TUNNEL_DEVICE_NAME="${topology_device}" \
     MTK_CONNECT_TERMINAL_USER="${terminal_user}" \
     MTK_CONNECT_DEVICE_PREFIX="Remotive" \
     MTK_CONNECT_TEST_ARTIFACT="${TOPOLOGY_NAME}" \
