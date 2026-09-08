@@ -70,13 +70,20 @@ func (s *moduleHelmStartup) Start(ctx context.Context) error {
 		return nil
 	}
 
+	// Only parent mod-* Applications take MODULE_CONFIG. Child Applications (app-role=child) are
+	// rendered by the parent's chart; rewriting their helm values here makes the parent OutOfSync
+	// against its own rendering (the Developer Portal then shows UPDATE IN PROGRESS indefinitely,
+	// because parents sync with prune but without selfHeal).
 	ul := &unstructured.UnstructuredList{}
 	ul.SetGroupVersionKind(schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "ApplicationList"})
 	if err := s.apiReader.List(ctx, ul,
 		client.InNamespace(s.argocdNS),
-		client.MatchingLabels{labelModuleManagerManaged: "true"},
+		client.MatchingLabels{
+			labelModuleManagerManaged:               "true",
+			controller.ModuleManagerAppRoleLabelKey: controller.ModuleManagerAppRoleParent,
+		},
 	); err != nil {
-		return fmt.Errorf("list module-manager-managed Applications: %w", err)
+		return fmt.Errorf("list module-manager-managed parent Applications: %w", err)
 	}
 	for i := range ul.Items {
 		name := ul.Items[i].GetName()
