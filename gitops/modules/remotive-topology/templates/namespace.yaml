@@ -1,0 +1,41 @@
+# Copyright (c) 2026 RemotiveLabs, All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Module-owned namespace for the remotive KCC ComputeInstanceTemplate CRs (published by the
+# remotive-instance-template workflow, which itself keeps running in <prefix>workflows).
+# Dedicated on purpose: the workloads-android disable path removes every ComputeInstanceTemplate in
+# the shared <prefix>workflows namespace, so remotive templates must never live there.
+#
+# Rendered by the mod-remotive-topology parent Application at wave 0, i.e. before the child
+# Application (wave 3) and its instance-template chart (kcc.instanceTemplates.namespace must match).
+# On disable, Module Manager first tears down the child Application and removes every
+# ComputeInstanceTemplate here (see module-manager remotive-topology teardown), then deletes the
+# parent, which prunes this namespace. The name must also match Module Manager's
+# remotiveKCCNamespaceSuffix ("remotive-kcc").
+#
+# No default-deny NetworkPolicy here (deliberate exception to gitops/templates/namespaces.yaml):
+# the namespace hosts no long-running pods, only KCC CRs and the chart's short-lived PostDelete
+# hook Job, which needs API-server egress.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.config.namespacePrefix }}remotive-kcc
+  labels:
+    app.kubernetes.io/name: remotive-topology
+    horizon-sdv.io/module: {{ .Values.moduleName | default "remotive-topology" | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    # Cluster-mode Config Connector project fallback for CRs applied without their own project-id annotation.
+    cnrm.cloud.google.com/project-id: {{ .Values.config.projectID | quote }}

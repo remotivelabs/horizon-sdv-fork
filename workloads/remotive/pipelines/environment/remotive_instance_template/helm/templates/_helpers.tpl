@@ -21,6 +21,18 @@ Helm helpers for remotive-instance-template.
 {{- coalesce .Values.namespace (printf "%s%s" (.Values.namespacePrefix | default "") "workflows") -}}
 {{- end -}}
 
+{{/*
+Module-owned namespace for the KCC ComputeInstanceTemplate CRs (and the CNRM PostDelete hook).
+Dedicated to remotive-topology — never the shared workflows namespace, where the workloads-android
+disable path removes every ComputeInstanceTemplate. Must match the Namespace rendered by
+gitops/modules/remotive-topology and Module Manager's remotive-topology teardown (remotive-kcc).
+*/}}
+{{- define "remotive-instance-template.kccNamespace" -}}
+{{- $kcc := .Values.kcc | default dict -}}
+{{- $it := $kcc.instanceTemplates | default dict -}}
+{{- coalesce $it.namespace (printf "%s%s" (.Values.namespacePrefix | default "") "remotive-kcc") -}}
+{{- end -}}
+
 {{- define "remotive-instance-template.workflowServiceAccountName" -}}
 {{- if .Values.spec.useElevatedWorkflowIam -}}
 workflow-executor-elevated

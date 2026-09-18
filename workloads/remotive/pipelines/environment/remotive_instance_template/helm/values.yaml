@@ -56,14 +56,18 @@ webhookWorkflowParameters:
 # KCC prerequisites for publishing ComputeInstanceTemplate CRs.
 kcc:
   instanceTemplates:
-    # Renders the remotive CNRM PreDelete hook (removes remotive-it-* CRs on module uninstall).
+    # Renders the remotive CNRM PostDelete hook (best-effort removal of remotive-it-* CRs after the child
+    # Application prunes; Module Manager's remotive-topology disable is the authoritative cleanup).
     enabled: true
-    # ConfigConnectorContext is a NAMESPACE SINGLETON (fixed name in the workflows
-    # namespace). The workloads-android module (cf_instance_template chart) also manages
-    # it. Enable here ONLY when workloads-android is not installed on the cluster —
-    # two Argo CD Applications must never both own the same context resource.
-    # NOTE: disabling whichever module owns the context removes it and breaks KCC
-    # publishing for the other module.
+    # Namespace holding the remotive ComputeInstanceTemplate CRs (and the PostDelete hook objects).
+    # Module-owned and dedicated: never the shared <prefix>workflows namespace, where the workloads-android
+    # disable path removes every ComputeInstanceTemplate. "" = <namespacePrefix>remotive-kcc, which must match
+    # the Namespace rendered by gitops/modules/remotive-topology and Module Manager's remotive-topology
+    # teardown. Workflow pods keep running in <prefix>workflows and write the CRs here; that needs
+    # spec.useElevatedWorkflowIam (workflow-executor-elevated is bound cluster-wide).
+    namespace: ""
+    # ConfigConnectorContext for the KCC namespace. Horizon runs Config Connector in cluster mode, where the
+    # operator rejects a ConfigConnectorContext — keep false; only set true on a namespaced-mode cluster.
     manageConfigConnectorContext: false
     # Namespaced-mode Config Connector GSA; default gke-config-connector-sa@<project>.iam.gserviceaccount.com
     configConnectorGoogleServiceAccount: ""
@@ -75,14 +79,15 @@ spec:
   # remotive builder container image (from this module's docker_image_template chart).
   dockerArtifactPathName: horizon-sdv/remotive-builder
   builderImageTag: argowf-latest
-  # KCC PreDelete hook Job only (kubectl + gcloud); not used by workflow DAG.
+  # KCC PostDelete hook Job only (kubectl + gcloud); not used by workflow DAG.
   cnrmPresDeleteImage: "gcr.io/google.com/cloudsdktool/cloud-sdk:461.0.0"
   pipelineRepoUrl: ""
   pipelineRepoRevision: ""
   pipelineRepoSecret: workflow-pipeline-git-creds
   serviceAccountName: workflow-executor
   # Packer + gcloud compute require Compute API permissions; the elevated KSA maps to
-  # gke-argo-workflows-elevated-sa.
+  # gke-argo-workflows-elevated-sa. Also required to publish ComputeInstanceTemplate CRs into
+  # kcc.instanceTemplates.namespace: workflow-executor's Role only covers <prefix>workflows.
   useElevatedWorkflowIam: true
   # GCE placement for the Packer builder and published template.
   network: sdv-network

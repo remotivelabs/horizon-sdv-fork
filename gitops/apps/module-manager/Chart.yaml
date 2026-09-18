@@ -15,6 +15,6 @@
 apiVersion: v2
 name: module-manager
 description: Horizon SDV Module Manager - controller and REST API for module enable/disable
-version: 0.3.2
+version: 0.3.3
 type: application
-appVersion: "0.3.2"
+appVersion: "0.3.3"

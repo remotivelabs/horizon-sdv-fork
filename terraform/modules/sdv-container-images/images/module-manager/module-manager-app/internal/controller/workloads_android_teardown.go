@@ -71,8 +71,9 @@ var configConnectorContextGVKs = []schema.GroupVersionKind{
 
 const configConnectorContextCRName = "configconnectorcontext.core.cnrm.cloud.google.com"
 
-// cuttlefishComputeInstanceTemplatesRemaining counts every CNRM ComputeInstanceTemplate in the list.
-// ConfigConnectorContext finalization is blocked while any remain in the namespace.
+// cuttlefishComputeInstanceTemplatesRemaining counts every CNRM ComputeInstanceTemplate in the list. Module KCC
+// namespaces are single-owner (see moduleComputeInstanceTemplateNamespace), so every CR counts; for
+// workloads-android, ConfigConnectorContext finalization is blocked while any remain in the namespace.
 func cuttlefishComputeInstanceTemplatesRemaining(ul *unstructured.UnstructuredList) int {
 	if ul == nil {
 		return 0
@@ -104,11 +105,11 @@ func listComputeInstanceTemplates(ctx context.Context, c client.Client, ns strin
 }
 
 func waitForCuttlefishComputeInstanceTemplatesAbsent(ctx context.Context, c client.Client, moduleConfig, moduleName string) error {
-	if moduleName != "workloads-android" {
+	ns, ok := moduleComputeInstanceTemplateNamespace(moduleConfig, moduleName)
+	if !ok {
 		return nil
 	}
-	logger := log.FromContext(ctx)
-	ns := NamespacePrefixFromModuleConfig(moduleConfig) + "workflows"
+	logger := log.FromContext(ctx).WithValues("module", moduleName)
 	deadline := time.Now().Add(cuttlefishComputeInstanceTemplateWaitAfterDelete)
 	var lastRemaining int
 	for time.Now().Before(deadline) {
@@ -123,7 +124,7 @@ func waitForCuttlefishComputeInstanceTemplatesAbsent(ctx context.Context, c clie
 		}
 		rem := cuttlefishComputeInstanceTemplatesRemaining(ul)
 		if rem == 0 {
-			logger.Info("ComputeInstanceTemplate CRs cleared from namespace (CCC teardown unblocked)", "namespace", ns)
+			logger.Info("ComputeInstanceTemplate CRs cleared from namespace", "namespace", ns)
 			return nil
 		}
 		if rem != lastRemaining {
@@ -355,19 +356,21 @@ func preparePrefixedModuleParentAndChildForDelete(ctx context.Context, c client.
 	return nil
 }
 
-// ensureCuttlefishComputeInstanceTemplatesRemoved deletes every KCC ComputeInstanceTemplate CR in the
-// workflows namespace so ConfigConnectorContext can finalize (Addon/controller blocks CCC deletion while
-// any remain). End state matches the cf_instance_template Helm PreDelete safety net (delete all in namespace).
-// Argo PreDelete may not run, may lag multi-source uninstall, or the child Application may be stuck until CCC
-// finalizes; issuing deletes from Module Manager as soon as the child Application delete is started avoids a
-// CCC↔CIT deadlock. Also used after the child CR is gone if finalizers were stripped manually.
-// After issuing deletes, polls until all CRs are gone from the API (including terminating objects).
+// ensureCuttlefishComputeInstanceTemplatesRemoved deletes every KCC ComputeInstanceTemplate CR in the module's
+// KCC namespace (moduleComputeInstanceTemplateNamespace: {prefix}workflows for workloads-android,
+// {prefix}remotive-kcc for remotive-topology) and polls until all CRs are gone from the API (including
+// terminating objects). CNRM deletes the matching GCP instance templates.
+// This is the authoritative cleanup on disable: Argo CD has no PreDelete hook type (the charts' historical
+// "PreDelete" Jobs never ran), a chart PostDelete hook only runs after the child prune completes, and the child
+// Application may be stuck until CCC finalizes. For workloads-android, issuing deletes as soon as the child
+// Application delete is started avoids a CCC↔CIT deadlock (the Addon blocks CCC deletion while any CIT remains).
+// Also used after the child CR is gone if finalizers were stripped manually.
 func ensureCuttlefishComputeInstanceTemplatesRemoved(ctx context.Context, c client.Client, moduleConfig, moduleName string) error {
-	if moduleName != "workloads-android" {
+	ns, ok := moduleComputeInstanceTemplateNamespace(moduleConfig, moduleName)
+	if !ok {
 		return nil
 	}
-	logger := log.FromContext(ctx)
-	ns := NamespacePrefixFromModuleConfig(moduleConfig) + "workflows"
+	logger := log.FromContext(ctx).WithValues("module", moduleName)
 
 	ul, err := listComputeInstanceTemplates(ctx, c, ns)
 	if err != nil {
@@ -382,7 +385,7 @@ func ensureCuttlefishComputeInstanceTemplatesRemoved(ctx context.Context, c clie
 		toDelete = append(toDelete, item)
 	}
 	if len(toDelete) > 0 {
-		logger.Info("deleting ComputeInstanceTemplate CRs during workloads-android teardown (all in namespace; CCC safety net)",
+		logger.Info("deleting ComputeInstanceTemplate CRs during module teardown (all in module KCC namespace)",
 			"namespace", ns, "count", len(toDelete))
 		for i := range toDelete {
 			it := toDelete[i]
@@ -392,6 +395,51 @@ func ensureCuttlefishComputeInstanceTemplatesRemoved(ctx context.Context, c clie
 		}
 	}
 	return waitForCuttlefishComputeInstanceTemplatesAbsent(ctx, c, moduleConfig, moduleName)
+}
+
+// WaitModuleKCCNamespaceNotTerminating blocks module enable while a module-owned KCC namespace is still
+// Terminating from the previous disable (remotive-topology: {prefix}remotive-kcc is pruned with the mod-*
+// parent chart, and namespace termination waits for CNRM to finalize any leftover ComputeInstanceTemplate).
+// The parent Application syncs without retry, so re-creating the Namespace while it terminates would leave
+// mod-* OutOfSync until a manual sync. workloads-android uses the platform workflows namespace (never pruned).
+func WaitModuleKCCNamespaceNotTerminating(ctx context.Context, c client.Client, moduleConfig, moduleName string) error {
+	if moduleName != "remotive-topology" {
+		return nil
+	}
+	ns, ok := moduleComputeInstanceTemplateNamespace(moduleConfig, moduleName)
+	if !ok {
+		return nil
+	}
+	logger := log.FromContext(ctx).WithValues("module", moduleName, "namespace", ns)
+	deadline := time.Now().Add(configConnectorContextMaxWait)
+	logged := false
+	for {
+		nsObj := &unstructured.Unstructured{}
+		nsObj.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"})
+		err := c.Get(ctx, types.NamespacedName{Name: ns}, nsObj)
+		if errors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("get module KCC namespace %q: %w", ns, err)
+		}
+		if nsObj.GetDeletionTimestamp().IsZero() {
+			return nil
+		}
+		if !logged {
+			logger.Info("module KCC namespace is still terminating from the previous disable; waiting before enable")
+			logged = true
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("module KCC namespace %q is still terminating after %s (leftover CNRM ComputeInstanceTemplate finalizers?); retry enable later",
+				ns, configConnectorContextMaxWait)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(configConnectorContextPollInterval):
+		}
+	}
 }
 
 // partitionArgoCDFinalizers splits finalizers into those owned by the argoproj.io API group (typical Argo CD
@@ -416,12 +464,12 @@ func partitionArgoCDFinalizers(finalizers []string) (kept, removed []string) {
 // If the child CR remains after moduleChildApplicationDeleteWait, finalizers are cleared in two phases:
 // Argo CD *.argoproj.io finalizers first, a short wait, then all remaining finalizers only as a last resort.
 //
-// For workloads-android, this path removes pipeline-owned ComputeInstanceTemplate CRs (and waits for them
-// to leave the API) so ConfigConnectorContext can finalize during Argo prune. Cleanup starts as soon as the
-// child Application delete is issued: waiting only until the child CR is gone can deadlock when Argo is
-// blocked on CCC while CCC cannot finalize until CITs are gone (Helm PreDelete may not run or may lag on
-// multi-source uninstall). The same CIT removal still runs again after the child disappears (idempotent).
-// Finally, wait for the workflows-namespace ConfigConnectorContext to be absent (GCP templates follow CNRM CR deletion).
+// For workloads-android and remotive-topology, this path removes pipeline-owned ComputeInstanceTemplate CRs
+// from the module's KCC namespace (and waits for them to leave the API; GCP templates follow CNRM CR deletion).
+// Cleanup starts as soon as the child Application delete is issued: for workloads-android, waiting only until
+// the child CR is gone can deadlock when Argo is blocked on CCC while CCC cannot finalize until CITs are gone.
+// The same CIT removal still runs again after the child disappears (idempotent).
+// Finally, for workloads-android, wait for the workflows-namespace ConfigConnectorContext to be absent.
 //
 // moduleConfig may be empty; NamespacePrefixFromModuleConfig then uses MODULE_CONFIG from the environment.
 // If the child Application CR is already absent, the parent is still prepared (skip-reconcile, etc.) so Git
@@ -463,7 +511,7 @@ func TeardownPrefixedModuleChildApplication(ctx context.Context, c client.Client
 			skipOnParent = true
 			logger.Info("prefixed module teardown: child Application already absent; prepared parent to prevent Git re-create",
 				"module", moduleName, "childApplication", childName, "parentApplication", parentName)
-			// Cuttlefish KCC CRs may remain while CNRM templates were removed out-of-band; still remove them.
+			// Module KCC CRs may remain while CNRM templates were removed out-of-band; still remove them.
 			if err := ensureCuttlefishComputeInstanceTemplatesRemoved(ctx, c, moduleConfig, moduleName); err != nil {
 				return err
 			}
@@ -516,7 +564,7 @@ func clearStuckPrefixedModuleChildFinalizers(ctx context.Context, c client.Clien
 		return fmt.Errorf("terminate stuck child Application operation: %w", err)
 	}
 	if err := ensureCuttlefishComputeInstanceTemplatesRemoved(ctx, c, moduleConfig, moduleName); err != nil {
-		return fmt.Errorf("remove Cuttlefish KCC ComputeInstanceTemplate CRs before clearing stuck child Application finalizers: %w", err)
+		return fmt.Errorf("remove module KCC ComputeInstanceTemplate CRs before clearing stuck child Application finalizers: %w", err)
 	}
 	key := types.NamespacedName{Namespace: argocdNamespace, Name: childName}
 	gvk := argoCDApplicationGVK

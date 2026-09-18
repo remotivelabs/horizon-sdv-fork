@@ -29,9 +29,9 @@ repo:
 # namespacePrefix, domain, workloads.android.url/branch (same monorepo carries the
 # remotive-topology pipelines), and pipeline auth via config.scm.authMethod.
 config:
-  # When true, the remotive_instance_template chart manages the ConfigConnectorContext in
-  # the workflows namespace. Keep false while workloads-android is installed — the
-  # context is a namespace singleton owned by the cf_instance_template chart there.
+  # When true, the remotive_instance_template chart manages a ConfigConnectorContext in the
+  # module-owned <prefix>remotive-kcc namespace. Only for namespaced-mode Config Connector;
+  # Horizon runs Config Connector in cluster mode (the operator rejects the context), so keep false.
   manageConfigConnectorContext: false
 
 overviewServiceName: mod-remotive-topology-overview

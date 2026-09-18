@@ -125,19 +125,27 @@ RemotiveStudio is started fire-and-forget: it is not stopped in teardown but goe
 away with the ephemeral VM. Its log is captured in the run artifacts
 (`remotive-argo-studio.log`).
 
-## Known cross-module caveats (workloads-android)
+## Namespaces
 
-Both this module and workloads-android publish KCC resources into the shared
-`<prefix>workflows` namespace:
+- `<prefix>workflows` (platform namespace): the remotive Workflows and
+  WorkflowTemplates, the `workflow-remotive-cloud-auth` and
+  `workflow-mtk-connect-apikey` Secrets, and the ephemeral `ComputeInstance` CRs
+  created per launcher run.
+- `<prefix>remotive-kcc` (module-owned): the KCC `ComputeInstanceTemplate` CRs
+  published by `remotive-instance-template`. The `mod-remotive-topology` parent
+  chart creates this namespace before the child Application syncs and prunes it on
+  disable. Keeping these CRs out of the shared workflows namespace means the
+  workloads-android disable path (which removes _every_ `ComputeInstanceTemplate`
+  in `<prefix>workflows`) no longer touches remotive templates. The launcher
+  resolves the template by its GCP self-link, so it is unaffected by the namespace.
 
-- **ConfigConnectorContext is a namespace singleton.** workloads-android's
-  cf_instance_template chart owns it by default. Set the module config
-  `manageConfigConnectorContext: true` for remotive-topology ONLY when
-  workloads-android is not installed. Disabling whichever module owns the context
-  removes it and breaks KCC publishing for the other.
-- **workloads-android disable is aggressive.** Its CNRM PreDelete hook deletes
-  _all_ `ComputeInstanceTemplate` CRs in the workflows namespace (it predates this
-  module), and Module Manager's workloads-android teardown waits for _every_ CIT to
-  leave the namespace. Disabling workloads-android while remotive-topology is
-  enabled will therefore also remove remotive instance templates — re-run
-  `remotive-instance-template` afterwards.
+Disabling `remotive-topology` removes the remotive `ComputeInstanceTemplate` CRs:
+Module Manager deletes every CR in `<prefix>remotive-kcc` as soon as the child
+Application delete is issued and waits for Config Connector to delete the GCP
+templates. The chart's Argo CD PostDelete hook is only a best-effort net for manual
+Application deletion (Argo CD has no PreDelete hook type). Re-run
+`remotive-instance-template` after re-enabling the module.
+
+Horizon runs Config Connector in cluster mode, so the KCC namespace needs no
+ConfigConnectorContext; `manageConfigConnectorContext` is only relevant for
+namespaced-mode Config Connector and defaults to false.

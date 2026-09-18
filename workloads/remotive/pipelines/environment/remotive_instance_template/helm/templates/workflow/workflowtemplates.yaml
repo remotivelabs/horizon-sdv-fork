@@ -139,7 +139,7 @@ spec:
             export NETWORK={{ $root.Values.spec.network | quote }}
             export SUBNET={{ $root.Values.spec.subnetwork | quote }}
             export DEFAULT_USER={{ $root.Values.spec.defaultUser | quote }}
-            export WORKFLOWS_NAMESPACE={{ include "remotive-instance-template.workflowNamespace" $root | quote }}
+            export KCC_NAMESPACE={{ include "remotive-instance-template.kccNamespace" $root | quote }}
             export REMOTIVE_INSTANCE_NAME='{{ "{{" }}workflow.parameters.instanceName{{ "}}" }}'
             export MACHINE_TYPE='{{ "{{" }}workflow.parameters.machineType{{ "}}" }}'
             export OS_PROJECT='{{ "{{" }}workflow.parameters.osProject{{ "}}" }}'

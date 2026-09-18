@@ -40,7 +40,8 @@
 #   MAX_RUN_DURATION   Max lifetime of VMs created FROM the template (default 12h; 0 = uncapped)
 #   PACKER_BUILD_MAX_RUN_DURATION  Max lifetime of the Packer BUILDER VM only (default 4h)
 #   PACKER_USE_IAP / PACKER_SSH_TIMEOUT / PACKER_IAP_TUNNEL_LAUNCH_WAIT
-#   WORKFLOWS_NAMESPACE  Namespace for the KCC ComputeInstanceTemplate CR
+#   KCC_NAMESPACE      Module-owned namespace for the KCC ComputeInstanceTemplate CR (default remotive-kcc;
+#                      never the shared workflows namespace — see helm/values.yaml kcc.instanceTemplates.namespace)
 
 set -uo pipefail
 
@@ -77,7 +78,7 @@ SERVICE_ACCOUNT=${SERVICE_ACCOUNT:-$(gcloud projects describe "${PROJECT}" --for
 REMOTIVE_INSTANCE_NAME=${REMOTIVE_INSTANCE_NAME:-remotive-vm}
 REMOTIVE_INSTANCE_NAME=$(echo "${REMOTIVE_INSTANCE_NAME}" | awk '{print tolower($0)}' | xargs)
 SUBNET=${SUBNET:-sdv-subnet}
-WORKFLOWS_NAMESPACE=${WORKFLOWS_NAMESPACE:-workflows}
+KCC_NAMESPACE=${KCC_NAMESPACE:-remotive-kcc}
 ZONE=${ZONE:-${CLOUD_ZONE:-europe-west1-d}}
 WORKSPACE=${WORKSPACE:-}
 
@@ -217,7 +218,7 @@ function echo_environment() {
     echo "SERVICE_ACCOUNT=${SERVICE_ACCOUNT}"
     echo "REMOTIVE_INSTANCE_NAME=${remotive_name}"
     echo "SUBNET=${SUBNET}"
-    echo "WORKFLOWS_NAMESPACE=${WORKFLOWS_NAMESPACE}"
+    echo "KCC_NAMESPACE=${KCC_NAMESPACE}"
     echo "WORKSPACE=${WORKSPACE}"
     echo "ZONE=${ZONE}"
     echo
@@ -329,14 +330,14 @@ function publish_instance_template_from_image() {
     local k8s_name
     k8s_name="$(remotive_kcc_template_k8s_name "${vm_remotive_instance_template}")"
 
-    echo_formatted "Publishing instance template via Config Connector (namespace: ${WORKFLOWS_NAMESPACE})"
+    echo_formatted "Publishing instance template via Config Connector (namespace: ${KCC_NAMESPACE})"
     echo_formatted "Target GCP instance template: ${vm_remotive_instance_template}"
 
     # Delete + recreate: most template fields are immutable. Delete the CR first
     # (wait); then best-effort REST deletes remove an orphan GCP template that
     # exists without a CR (apply would otherwise adopt the stale object).
     local kcc_delete_timeout="${KCC_INSTANCE_TEMPLATE_DELETE_TIMEOUT:-15m}"
-    if ! kubectl -n "${WORKFLOWS_NAMESPACE}" delete computeinstancetemplate "${k8s_name}" \
+    if ! kubectl -n "${KCC_NAMESPACE}" delete computeinstancetemplate "${k8s_name}" \
         --ignore-not-found=true --wait=true --timeout="${kcc_delete_timeout}"; then
         echo -e "${RED}ERROR: kubectl delete ComputeInstanceTemplate ${k8s_name} failed or timed out.${NC}" >&2
         return 1
@@ -344,7 +345,7 @@ function publish_instance_template_from_image() {
     compute_rest_best_effort delete-instance-template "${PROJECT}" "${vm_remotive_instance_template}"
     compute_rest_best_effort delete-regional-instance-template "${PROJECT}" "${REGION}" "${vm_remotive_instance_template}"
 
-    if ! kubectl -n "${WORKFLOWS_NAMESPACE}" apply -f - <<EOF
+    if ! kubectl -n "${KCC_NAMESPACE}" apply -f - <<EOF
 apiVersion: compute.cnrm.cloud.google.com/v1beta1
 kind: ComputeInstanceTemplate
 metadata:
@@ -420,7 +421,7 @@ function delete_remotive_publish_target_only() {
     local k8s_name
     k8s_name="$(remotive_kcc_template_k8s_name "${vm_remotive_instance_template}")"
     if command -v kubectl >/dev/null 2>&1; then
-        kubectl -n "${WORKFLOWS_NAMESPACE}" delete computeinstancetemplate "${k8s_name}" \
+        kubectl -n "${KCC_NAMESPACE}" delete computeinstancetemplate "${k8s_name}" \
             --ignore-not-found=true --wait=true --timeout="${KCC_INSTANCE_TEMPLATE_DELETE_TIMEOUT:-15m}" || \
             echo -e "${ORANGE}WARNING: kubectl delete ComputeInstanceTemplate ${k8s_name} failed${NC}" >&2
     else

@@ -67,8 +67,11 @@ spec:
           kcc:
             instanceTemplates:
               enabled: true
-              # Namespace singleton owned by workloads-android's cf_instance_template
-              # chart when that module is installed — see this chart's values.yaml.
+              # Module-owned namespace for the remotive ComputeInstanceTemplate CRs — rendered by this
+              # chart's templates/namespace.yaml (wave 0, before this child Application) and known to
+              # Module Manager's remotive-topology teardown. Never the shared workflows namespace.
+              namespace: {{ .Values.config.namespacePrefix }}remotive-kcc
+              # Cluster-mode Config Connector needs no ConfigConnectorContext — see this chart's values.yaml.
               manageConfigConnectorContext: {{ .Values.config.manageConfigConnectorContext | default false }}
           spec:
             cloudProject: {{ .Values.config.projectID | quote }}

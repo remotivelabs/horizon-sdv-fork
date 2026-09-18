@@ -830,6 +830,9 @@ func (h *Handler) enableOneModule(ctx context.Context, moduleName, targetRevisio
 	if err := controller.WaitWorkflowsConfigConnectorContextAbsentOrNotTerminating(ctx, h.client, h.moduleConfig, moduleName); err != nil {
 		return err
 	}
+	if err := controller.WaitModuleKCCNamespaceNotTerminating(ctx, h.client, h.moduleConfig, moduleName); err != nil {
+		return err
+	}
 
 	appName := controller.ApplicationName(moduleName)
 	parentONS := ""

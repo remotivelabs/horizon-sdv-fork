@@ -116,8 +116,8 @@ locals {
     }
     "module-manager-app" = {
       directory      = "module-manager"
-      build_version  = "0.3.2"
-      deploy_version = "0.3.2"
+      build_version  = "0.3.3"
+      deploy_version = "0.3.3"
     }
     "workflow-namespace-drain-app" = {
       directory      = "workflow-namespace-drain"

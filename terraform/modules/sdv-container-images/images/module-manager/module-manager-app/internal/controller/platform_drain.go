@@ -106,6 +106,9 @@ func (p *PlatformDrainer) DrainAllEnabledModules(ctx context.Context) error {
 	// module destination namespaces so that KCC-managed resources (e.g. PubSubTopic) do not
 	// block namespace termination when KCC has lost GCP authentication.
 	nss := p.ManagedDestinationNamespaces(ctx, p.ArgoCDNamespace)
+	// Module-owned KCC namespaces are not Application destinations (workflows publish the CRs there), so they
+	// are not discovered above; add remotive-topology's namespace explicitly (absent namespaces list nothing).
+	nss = appendNamespaceOnce(nss, NamespacePrefixFromModuleConfig(os.Getenv("MODULE_CONFIG"))+remotiveKCCNamespaceSuffix)
 	return p.StripKCCFinalizersInNamespaces(ctx, nss)
 }
 
@@ -211,6 +214,19 @@ func (p *PlatformDrainer) ManagedDestinationNamespaces(ctx context.Context, argo
 		out = append(out, ns)
 	}
 	return out
+}
+
+// appendNamespaceOnce appends ns unless it is empty or already present.
+func appendNamespaceOnce(nss []string, ns string) []string {
+	if ns == "" {
+		return nss
+	}
+	for _, existing := range nss {
+		if existing == ns {
+			return nss
+		}
+	}
+	return append(nss, ns)
 }
 
 // RemovePlatformDrainFinalizer removes only Module Manager's finalizer from the root Application.

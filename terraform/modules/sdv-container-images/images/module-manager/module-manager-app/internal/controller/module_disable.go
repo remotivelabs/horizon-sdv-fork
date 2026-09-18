@@ -30,10 +30,11 @@ import (
 // callers should invoke RunAutoDisableSweep and ResyncSoftFeaturesForParentsOfSoftDep
 // after disable side effects as appropriate.
 //
-// For workloads-android, TeardownPrefixedModuleChildApplication removes the child Application,
-// clears ComputeInstanceTemplate CRs in the workflows namespace, and waits for ConfigConnectorContext
-// to be absent so the cluster matches the pre-enable / pre–cf_instance_template baseline (CNRM deletes
-// matching GCP instance templates when those CRs are removed).
+// For workloads-android and remotive-topology, TeardownPrefixedModuleChildApplication removes the child
+// Application and clears ComputeInstanceTemplate CRs in the module's KCC namespace ({prefix}workflows resp.
+// {prefix}remotive-kcc; CNRM deletes matching GCP instance templates when those CRs are removed). For
+// workloads-android it also waits for ConfigConnectorContext to be absent so the cluster matches the
+// pre-enable / pre–cf_instance_template baseline.
 //
 // Ordering note (vs platform drain): this path updates ModuleManagerState before deleting the parent
 // mod-* Application so the Portal API reflects disabled during long Argo prunes. PlatformDrainer
@@ -46,8 +47,9 @@ import (
 // REST disable sets this to true. Auto-disable sets it to false because eligibility is
 // determined by hard- and soft-dependent checks before this runs.
 //
-// moduleConfig is Helm MODULE_CONFIG YAML/JSON (may be empty). For workloads-android and workloads-common,
-// the prefixed multi-source child Application is torn down first; empty moduleConfig falls back to MODULE_CONFIG env.
+// moduleConfig is Helm MODULE_CONFIG YAML/JSON (may be empty). For workloads-android, workloads-common and
+// remotive-topology, the prefixed multi-source child Application is torn down first; empty moduleConfig falls
+// back to MODULE_CONFIG env.
 func PerformModuleDisable(ctx context.Context, c client.Client, stateStore StateStoreInterface, catalogStore CatalogStoreInterface, argocdNamespace, mmNamespace string, moduleName, moduleID string, enforceNoHardDependents bool, moduleConfig string) error {
 	logger := log.FromContext(ctx)
 	if moduleName == "" || moduleID == "" {
