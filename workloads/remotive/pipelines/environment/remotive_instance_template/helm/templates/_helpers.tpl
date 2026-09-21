@@ -22,7 +22,7 @@ Helm helpers for remotive-instance-template.
 {{- end -}}
 
 {{/*
-Module-owned namespace for the KCC ComputeInstanceTemplate CRs (and the CNRM PostDelete hook).
+Module-owned namespace for the KCC ComputeInstanceTemplate CRs.
 Dedicated to remotive-topology — never the shared workflows namespace, where the workloads-android
 disable path removes every ComputeInstanceTemplate. Must match the Namespace rendered by
 gitops/modules/remotive-topology and Module Manager's remotive-topology teardown (remotive-kcc).

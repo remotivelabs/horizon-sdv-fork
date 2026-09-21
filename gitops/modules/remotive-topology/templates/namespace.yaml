@@ -25,8 +25,7 @@
 # remotiveKCCNamespaceSuffix ("remotive-kcc").
 #
 # No default-deny NetworkPolicy here (deliberate exception to gitops/templates/namespaces.yaml):
-# the namespace hosts no long-running pods, only KCC CRs and the chart's short-lived PostDelete
-# hook Job, which needs API-server egress.
+# the namespace hosts no pods, only KCC CRs.
 ---
 apiVersion: v1
 kind: Namespace

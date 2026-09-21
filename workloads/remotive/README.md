@@ -142,9 +142,7 @@ away with the ephemeral VM. Its log is captured in the run artifacts
 Disabling `remotive-topology` removes the remotive `ComputeInstanceTemplate` CRs:
 Module Manager deletes every CR in `<prefix>remotive-kcc` as soon as the child
 Application delete is issued and waits for Config Connector to delete the GCP
-templates. The chart's Argo CD PostDelete hook is only a best-effort net for manual
-Application deletion (Argo CD has no PreDelete hook type). Re-run
-`remotive-instance-template` after re-enabling the module.
+templates.
 
 Horizon runs Config Connector in cluster mode, so the KCC namespace needs no
 ConfigConnectorContext; `manageConfigConnectorContext` is only relevant for

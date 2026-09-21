@@ -361,8 +361,9 @@ func preparePrefixedModuleParentAndChildForDelete(ctx context.Context, c client.
 // {prefix}remotive-kcc for remotive-topology) and polls until all CRs are gone from the API (including
 // terminating objects). CNRM deletes the matching GCP instance templates.
 // This is the authoritative cleanup on disable: Argo CD has no PreDelete hook type (the charts' historical
-// "PreDelete" Jobs never ran), a chart PostDelete hook only runs after the child prune completes, and the child
-// Application may be stuck until CCC finalizes. For workloads-android, issuing deletes as soon as the child
+// "PreDelete" Jobs never ran), a PostDelete hook would add finalizers that leave the parent mod-* Application
+// permanently OutOfSync, and the child Application may be stuck until CCC finalizes. For workloads-android,
+// issuing deletes as soon as the child
 // Application delete is started avoids a CCC↔CIT deadlock (the Addon blocks CCC deletion while any CIT remains).
 // Also used after the child CR is gone if finalizers were stripped manually.
 func ensureCuttlefishComputeInstanceTemplatesRemoved(ctx context.Context, c client.Client, moduleConfig, moduleName string) error {

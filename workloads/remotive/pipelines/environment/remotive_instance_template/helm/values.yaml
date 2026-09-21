@@ -56,10 +56,13 @@ webhookWorkflowParameters:
 # KCC prerequisites for publishing ComputeInstanceTemplate CRs.
 kcc:
   instanceTemplates:
-    # Renders the remotive CNRM PostDelete hook (best-effort removal of remotive-it-* CRs after the child
-    # Application prunes; Module Manager's remotive-topology disable is the authoritative cleanup).
+    # Enables the KCC templates of this chart (currently only the optional ConfigConnectorContext below).
+    # Cleanup of remotive-it-* CRs on module disable is done by Module Manager's remotive-topology teardown;
+    # the chart deliberately ships no Argo CD delete hook: Argo CD has no PreDelete hook type, and a
+    # PostDelete hook adds finalizers to the child Application that leave the parent mod-* Application
+    # permanently OutOfSync.
     enabled: true
-    # Namespace holding the remotive ComputeInstanceTemplate CRs (and the PostDelete hook objects).
+    # Namespace holding the remotive ComputeInstanceTemplate CRs.
     # Module-owned and dedicated: never the shared <prefix>workflows namespace, where the workloads-android
     # disable path removes every ComputeInstanceTemplate. "" = <namespacePrefix>remotive-kcc, which must match
     # the Namespace rendered by gitops/modules/remotive-topology and Module Manager's remotive-topology
@@ -79,8 +82,6 @@ spec:
   # remotive builder container image (from this module's docker_image_template chart).
   dockerArtifactPathName: horizon-sdv/remotive-builder
   builderImageTag: argowf-latest
-  # KCC PostDelete hook Job only (kubectl + gcloud); not used by workflow DAG.
-  cnrmPresDeleteImage: "gcr.io/google.com/cloudsdktool/cloud-sdk:461.0.0"
   pipelineRepoUrl: ""
   pipelineRepoRevision: ""
   pipelineRepoSecret: workflow-pipeline-git-creds
