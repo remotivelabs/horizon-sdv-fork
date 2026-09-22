@@ -111,11 +111,12 @@ limitations under the License. -->
           </li>
           <li>
             <code>remotive-launcher</code> — boot an ephemeral VM from the template,
-            build and start a topology (default: the vendored
-            <code>getting_started</code> project, or any project via
-            <code>topologyDownloadUrl</code>), optionally run its tests, keep it
-            alive for interactive access, then tear down. Logs and results land
-            in GCS.
+            download the topology project archive given by
+            <code>topologyDownloadUrl</code> (a <code>gs://</code> or
+            <code>https://</code> URL to a <code>.tgz</code>/<code>.tar.gz</code>;
+            no topology ships with Horizon), build and start it, optionally run
+            its tests, keep it alive for interactive access, then tear down.
+            Logs and results land in GCS.
           </li>
         </ul>
       </div>

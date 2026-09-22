@@ -10,8 +10,6 @@ includes several examples of RemotiveTopology platforms and instances.
 
 ## Layout
 
-- `topologies/getting_started/` — vendored demo topology (see `VENDORED.md` for
-  provenance) plus the Horizon-specific `getting_started.launcher.yaml` descriptor.
 - `pipelines/environment/docker_image_template/` — builder container image
   (packer, gcloud, kubectl) used by all remotive workflow pods; builds via
   the shared `common-docker-image-build` ClusterWorkflowTemplate (module
@@ -32,7 +30,9 @@ which modules are enabled).
 1. `remotive-builder-image` — once, and after Dockerfile changes.
 2. `remotive-instance-template` — publishes `instance-template-<instanceName>`
    (default `instance-template-remotive-vm`).
-3. `remotive-launcher` — per topology run.
+3. `remotive-launcher` — per topology run. Takes the topology project as a
+   downloadable archive (`topologyDownloadUrl`, see below); no topology project is
+   shipped in this repository.
 
 ## One-time setup: RemotiveCloud auth Secret
 
@@ -49,13 +49,37 @@ The token is exported only into the topology process environment on the ephemera
 VM (not `/etc/environment` as in the upstream demo) and travels through the run's
 GCS staging prefix like other job parameters — keep the token revocable.
 
-## Running a non-vendored topology
+## Providing the topology project
 
-`remotive-launcher` accepts `topologyDownloadUrl` (a `gs://bucket/dir` or an https
-`.tgz`/`.tar.gz` URL) containing a self-contained topology project. The project
-must include a `<topologyName>.launcher.yaml` descriptor at the project root
-(the path can be overridden with the optional `launcherFile` workflow parameter,
-relative to the project root):
+`remotive-launcher` requires two parameters that together identify the topology
+project:
+
+- `topologyDownloadUrl` (required) — a `gs://` or `https://` URL to a gzip tarball
+  (`.tgz` or `.tar.gz`) of a self-contained topology project. The URL must end in
+  one of those suffixes; directories, plain `.tar`, `.zip` and other formats are
+  rejected by the workflow pod before a VM is booted.
+- `topologyName` (required) — the project name. The archive is unpacked to
+  `/opt/remotive/projects/<topologyName>` on the VM and the launcher looks for
+  `<topologyName>.launcher.yaml` there.
+
+The archive root must be the project root, i.e. the descriptor and the
+`instances/`, `models/`, ... directories sit directly in the tarball, without a
+wrapping top-level folder:
+
+```sh
+tar czf my_topology.tgz -C /path/to/my_topology .
+gcloud storage cp my_topology.tgz gs://<bucket>/my_topology.tgz
+```
+
+`gs://` archives are downloaded on the VM with `gcloud storage cp` using the VM's
+service account (the instance template's `SERVICE_ACCOUNT`, by default the
+project's Compute Engine default service account), so the bucket must grant that
+account object read access. `https://` archives are fetched with `curl` without
+credentials and must be publicly readable or pre-signed.
+
+The project must include a `<topologyName>.launcher.yaml` descriptor at the
+project root (the path can be overridden with the optional `launcherFile`
+workflow parameter, relative to the project root):
 
 ```yaml
 topology_instances: # -f flags for `remotive topology build`, in order (required, non-empty)

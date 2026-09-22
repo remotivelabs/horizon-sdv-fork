@@ -54,10 +54,10 @@ spec:
         description: "Opaque provenance label (e.g. portal id); stored on workflow labels."
       - name: topologyName
         value: {{ $root.Values.defaults.topologyName | quote }}
-        description: "Topology to run: a vendored project under workloads/remotive/topologies/ (default getting_started), or the project name when topologyDownloadUrl is set."
+        description: "Required. Topology project name: the descriptor is <topologyName>.launcher.yaml at the archive root (unless launcherFile is set) and the project is unpacked to /opt/remotive/projects/<topologyName> on the VM."
       - name: topologyDownloadUrl
         value: ""
-        description: "Optional topology project source instead of the vendored copy: gs://bucket/dir or an https .tgz URL."
+        description: "Required. Topology project archive: a gs:// or https:// URL ending in .tgz or .tar.gz whose root is the project root. gs:// is read with the VM service account; https:// must be public or pre-signed."
       - name: launcherFile
         value: ""
         description: "Optional launcher descriptor path relative to the topology project root; empty means <topologyName>.launcher.yaml."
@@ -227,6 +227,22 @@ spec:
               echo "instanceTemplateName is required" >&2
               exit 2
             fi
+            if [[ -z "${TOPOLOGY_NAME}" ]]; then
+              echo "topologyName is required" >&2
+              exit 2
+            fi
+            # Validate before booting a VM: the guest only accepts gzip tarballs.
+            case "${TOPOLOGY_DOWNLOAD_URL}" in
+              gs://*.tgz|gs://*.tar.gz|https://*.tgz|https://*.tar.gz) ;;
+              "")
+                echo "topologyDownloadUrl is required (gs:// or https:// URL ending in .tgz or .tar.gz)" >&2
+                exit 2
+                ;;
+              *)
+                echo "unsupported topologyDownloadUrl '${TOPOLOGY_DOWNLOAD_URL}': must be a gs:// or https:// URL ending in .tgz or .tar.gz" >&2
+                exit 2
+                ;;
+            esac
             export REMOTIVE_ARGO_LOCAL_ARTIFACT_ROOT=/tmp/remotive-argo-artifacts
             mkdir -p "${REMOTIVE_ARGO_LOCAL_ARTIFACT_ROOT}"
             # Git artifact mounts are often noexec — invoke with bash.

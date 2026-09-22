@@ -333,34 +333,36 @@ function _keep_alive_minutes() {
   fi
 }
 
+# The topology project always comes from TOPOLOGY_DOWNLOAD_URL: a gzip tarball
+# (.tgz / .tar.gz) whose root is the project root (the descriptor sits directly
+# in it). gs:// objects are fetched with the VM service account via gcloud;
+# https:// URLs with curl (no auth, so they must be public or pre-signed).
+# The repo ships no topology projects.
 function resolve_topology_project() {
+  : "${TOPOLOGY_DOWNLOAD_URL:?topologyDownloadUrl is required (gs:// or https:// .tgz/.tar.gz)}"
   sudo mkdir -p "${PROJECTS_BASE}"
   sudo chown -R "$(id -un):$(id -gn)" "${PROJECTS_BASE}"
   rm -rf "${PROJECT_PATH}"
 
-  if [[ -n "${TOPOLOGY_DOWNLOAD_URL:-}" ]]; then
-    echo "[remotive-argo-remote] fetching topology project from ${TOPOLOGY_DOWNLOAD_URL}"
-    mkdir -p "${PROJECT_PATH}"
-    case "${TOPOLOGY_DOWNLOAD_URL}" in
-      gs://*)
-        gcloud storage cp -r "${TOPOLOGY_DOWNLOAD_URL%/}/*" "${PROJECT_PATH}/"
-        ;;
-      *.tgz|*.tar.gz)
-        curl -fsSL "${TOPOLOGY_DOWNLOAD_URL}" | tar xz -C "${PROJECT_PATH}"
-        ;;
-      *)
-        echo "[remotive-argo-remote] ERROR: unsupported TOPOLOGY_DOWNLOAD_URL (use gs://dir or a .tgz/.tar.gz URL)" >&2
-        return 1
-        ;;
-    esac
-  else
-    local vendored="${WORKSPACE}/workloads/remotive/topologies/${TOPOLOGY_NAME}"
-    if [[ ! -d "${vendored}" ]]; then
-      echo "[remotive-argo-remote] ERROR: no vendored topology '${TOPOLOGY_NAME}' and no topologyDownloadUrl" >&2
+  case "${TOPOLOGY_DOWNLOAD_URL}" in
+    gs://*.tgz|gs://*.tar.gz|https://*.tgz|https://*.tar.gz) ;;
+    *)
+      echo "[remotive-argo-remote] ERROR: unsupported TOPOLOGY_DOWNLOAD_URL '${TOPOLOGY_DOWNLOAD_URL}' (must be a gs:// or https:// URL ending in .tgz or .tar.gz)" >&2
       return 1
-    fi
-    cp -a "${vendored}" "${PROJECT_PATH}"
-  fi
+      ;;
+  esac
+
+  local archive="/tmp/remotive-argo-topology.tgz"
+  rm -f "${archive}"
+  echo "[remotive-argo-remote] fetching topology archive from ${TOPOLOGY_DOWNLOAD_URL}"
+  case "${TOPOLOGY_DOWNLOAD_URL}" in
+    gs://*)   gcloud storage cp "${TOPOLOGY_DOWNLOAD_URL}" "${archive}" ;;
+    https://*) curl -fsSL -o "${archive}" "${TOPOLOGY_DOWNLOAD_URL}" ;;
+  esac
+
+  mkdir -p "${PROJECT_PATH}"
+  tar xzf "${archive}" -C "${PROJECT_PATH}"
+  rm -f "${archive}"
   rm -rf "${PROJECT_PATH}/build"
 }
 

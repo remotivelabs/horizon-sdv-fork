@@ -19,7 +19,7 @@
 #   GCE VM — the remotive analogue of cvd_argo_gce/cvd_argo_gce_ephemeral.sh 
 #
 #   Steps:
-#     1. Upload job env + script/topology bundle to GCS (ephemeral-input/)
+#     1. Upload job env + guest script bundle to GCS (ephemeral-input/)
 #     2. Apply KCC ComputeInstance; guest startup runs from instance metadata
 #     3. Poll GCS status.json; stream guest logs from serial port 2
 #     4. Download remotive-argo-artifacts.tgz to REMOTIVE_ARGO_LOCAL_ARTIFACT_ROOT
@@ -101,16 +101,15 @@ function write_job_env_for_vm() {
 # -----------------------------------------------------------------------------
 # remotive_argo_package_guest_scripts
 # -----------------------------------------------------------------------------
-# Bundle the guest-needed repo subtrees: remotive_launcher scripts, vendored topologies,
-# and mtk-connect. Helm content is excluded; README.md is NOT excluded — vendored
-# topologies (e.g. getting_started) COPY it as a build input in their Dockerfile.
+# Bundle the guest-needed repo subtrees: remotive_launcher scripts and mtk-connect.
+# Helm content is excluded. The topology project itself is not part of the bundle:
+# the guest downloads it from TOPOLOGY_DOWNLOAD_URL (the repo ships no topologies).
 
 function remotive_argo_package_guest_scripts() {
   local out="${1:?}"
   local -a paths=(
     workloads/common/mtk-connect
     workloads/remotive/pipelines/tests/remotive_launcher
-    workloads/remotive/topologies
   )
   local p
   for p in "${paths[@]}"; do

@@ -101,7 +101,8 @@ spec:
 
 # WorkflowTemplate parameter defaults (Portal-facing).
 defaults:
-  topologyName: getting_started
+  # No topology ships with the repo: topologyName and topologyDownloadUrl are required per run.
+  topologyName: ""
   runTopologyTests: "true"
   # Idle keep-alive minutes after topology-up (and tests) before teardown; 0 = immediate.
   keepAliveTime: "15"
